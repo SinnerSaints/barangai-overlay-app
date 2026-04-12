@@ -1,0 +1,7 @@
+pygetwindow
+pyautogui
+Pillow
+requests
+PyQt6
+pyinstaller
+python-dotenv
