@@ -2,38 +2,57 @@ import requests
 import os
 from dotenv import load_dotenv
 
-load_dotenv()  # load environment variables from .env file
+load_dotenv()
+
+SERVER_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://localhost:8001")
 
 
-BACKEND_URL = os.getenv("BACKEND_URL")
-AI_SERVICE_URL = os.getenv("AI_SERVICE_URL")
-
-def login(username: str, password: str) -> dict:
+def login(email: str, password: str) -> dict:
     """
-    Logs in through Django backend.
-    Same login as the web app.
-    Returns token if successful.
+    Runs login and token fetch at the same time.
+    Returns token if both succeed.
     """
     try:
-        response = requests.post(
-            f"{BACKEND_URL}/api/token/",  # change to your actual login endpoint
+        # Step 1 — authenticate use
+        login_response = requests.post(
+            f"{SERVER_URL}/accounts/login/",
             json={
-                "username": username,
+                "email": email,
                 "password": password
             },
             timeout=10
         )
 
-        if response.status_code == 200:
-            return {
-                "success": True,
-                "token": response.json().get("access")  # JWT token from Django
-            }
-        else:
+        if login_response.status_code != 200:
             return {
                 "success": False,
-                "message": "Invalid username or password."
+                "message": "Invalid email or password."
             }
+
+        # Step 2 — get token immediately after login
+        token_response = requests.post(
+            f"{SERVER_URL}/accounts/token/",
+            json={
+                "email": email,
+                "password": password
+            },
+            timeout=10
+        )
+
+        if token_response.status_code != 200:
+            return {
+                "success": False,
+                "message": "Authentication failed. Please try again."
+            }
+
+        token_data = token_response.json()
+
+        return {
+            "success": True,
+            "access_token": token_data.get("access"),
+            "user_id": login_response.json().get("id"),  # adjust key based on your actual response
+        }
 
     except requests.exceptions.ConnectionError:
         return {
@@ -43,22 +62,34 @@ def login(username: str, password: str) -> dict:
     except Exception as e:
         return {
             "success": False,
-            "message": "An unexpected error occurred."
+            "message": f"An unexpected error occurred: {str(e)}"
         }
 
 
-def send_message(message: str, context: str, token: str) -> str:
+def send_message(
+    message: str,
+    screenshot_b64: str,
+    user_id: int,
+    session_uuid: str,
+    token: str
+) -> dict:
     """
-    Sends user message + context to FastAPI AI service.
-    Returns AI response as a string.
+    Sends message + screenshot to FastAPI chat endpoint.
+    Returns full response dict.
     """
     try:
+        payload = {
+            "message": message,
+            "user_id": int(user_id),
+            "screenshot": screenshot_b64,
+        }
+
+        if session_uuid:
+            payload["session_uuid"] = session_uuid
+
         response = requests.post(
-            f"{AI_SERVICE_URL}/chat/",
-            json={
-                "message": message,
-                "context": context,
-            },
+            f"{SERVICE_URL}/chat/",
+            json=payload,
             headers={
                 "Authorization": f"Bearer {token}"
             },
@@ -66,15 +97,22 @@ def send_message(message: str, context: str, token: str) -> str:
         )
 
         if response.status_code == 200:
-            return response.json().get("response", "Sorry, I could not get a response.")
+            return {
+                "success": True,
+                "response": response.json().get("response"),
+                "session_uuid": response.json().get("session_uuid"),
+            }
         elif response.status_code == 401:
-            return "SESSION_EXPIRED"
+            return {"success": False, "response": "SESSION_EXPIRED"}
+        elif response.status_code == 404:
+            return {"success": False, "response": "User not found."}
         else:
-            return "Sorry, something went wrong. Please try again."
+            return {"success": False, "response": "Sorry, something went wrong. Please try again."}
 
     except requests.exceptions.ConnectionError:
-        return "Cannot connect to BarangAI service. Please check your internet."
+        return {"success": False, "response": "Cannot connect to BarangAI service."}
     except requests.exceptions.Timeout:
-        return "Response took too long. Please try again."
+        return {"success": False, "response": "Response took too long. Please try again."}
     except Exception as e:
-        return "An unexpected error occurred."
+        return {"success": False, "response": f"Unexpected error: {str(e)}"}
+    
