@@ -3,74 +3,119 @@ from PyQt6.QtWidgets import (
     QTextEdit, QLineEdit, QPushButton,
     QLabel, QApplication
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QPoint
-from PyQt6.QtGui import QIcon, QFont
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QPoint, QSize
+from PyQt6.QtGui import QIcon
+from screen_capture import capture_screen
+from api_client import send_message
+from utils import get_resource_path
+import ctypes
+
+DARK_BG       = "#0f1923"
+DARK_CARD     = "#1a2535"
+DARK_BORDER   = "#2a3a4a"
+GREEN_PRIMARY = "#4ade80"
+GREEN_HOVER   = "#22c55e"
+TEXT_PRIMARY  = "#ffffff"
+TEXT_MUTED    = "#6b7280"
+TEXT_LABEL    = "#9ca3af"
+RED_ERROR     = "#ef4444"
 
 
 class AIWorker(QThread):
-    response_ready = pyqtSignal(str)
+    response_ready = pyqtSignal(dict)
 
-    def __init__(self, message, token):
+    def __init__(self, message, screen_data, user_id, session_uuid, token):
         super().__init__()
         self.message = message
+        self.screen_data = screen_data
+        self.user_id = user_id
+        self.session_uuid = session_uuid
         self.token = token
 
     def run(self):
-        self.response_ready.emit(f"This is a test response for: '{self.message}'")
+        screenshot_b64 = self.screen_data.get("screenshot")
 
+        # FOR DEBUG PURPOSES
+        print("\n" + "="*40)
+        print(f"🗨️ USER MESSAGE : {self.message}")
+        print(f"🎯 ACTIVE WINDOW: {self.screen_data['active_window']}")
+        print(f"🧠 AI CONTEXT   : {self.screen_data['context']}")
+        print("="*40 + "\n")
+
+        # Simulate a tiny 1-second "thinking" delay
+        QThread.msleep(1000)
+        
+        result = send_message(
+            message=self.message,
+            screenshot_b64=screenshot_b64,
+            user_id=self.user_id,
+            session_uuid=self.session_uuid,
+            token=self.token
+        )
+
+        '''
+        # 3. Send a fake response back to the GUI so it doesn't freeze. FOR TESTING
+        dummy_result = {
+            "success": True,
+            "response": f"System Test OK! I detected you were looking at: <b>{self.screen_data['active_window']}</b>",
+            "session_uuid": self.session_uuid
+        }
+        '''
+
+        self.response_ready.emit(result)
 
 class FloatingButton(QWidget):
-    """
-    Small floating button that stays on screen when overlay is hidden.
-    Click it to bring the overlay back.
-    """
     clicked = pyqtSignal()
 
     def __init__(self):
         super().__init__()
-        self.setup_ui()
         self.drag_position = QPoint()
+        self.setup_ui()
 
     def setup_ui(self):
-        # no window border, always on top, no taskbar entry
         self.setWindowFlags(
             Qt.WindowType.WindowStaysOnTopHint |
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.Tool
         )
-
-        # transparent background so only button is visible
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        hwnd = int(self.winId())
+        ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x11)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # the floating button itself
-        self.btn = QPushButton("💬")
+        icon_path = get_resource_path("icon.png")
+        
+        self.btn = QPushButton()
         self.btn.setFixedSize(55, 55)
+
+        self.btn.setIcon(QIcon(icon_path))
+        self.btn.setIconSize(QSize(40, 40)) # Adjust this (35-45) to fit your taste
+        
         self.btn.setToolTip("Open BarangAI Assistant")
-        self.btn.setFont(QFont("Arial", 20))
+
         self.btn.setStyleSheet("""
             QPushButton {
-                background-color: #4CAF50;
-                color: white;
+                background-color: transparent; /* No more green box */
+                border: none;                 /* No more border */
                 border-radius: 27px;
-                border: 2px solid #388E3C;
+                outline: none;
             }
             QPushButton:hover {
-                background-color: #45a049;
+                background-color: transparent;
             }
             QPushButton:pressed {
-                background-color: #388E3C;
+                background-color: transparent;
             }
         """)
+        
         self.btn.clicked.connect(self.clicked.emit)
         layout.addWidget(self.btn)
 
         self.setLayout(layout)
         self.setFixedSize(55, 55)
-
-        # position on bottom-right of screen
         self.position_button()
 
     def position_button(self):
@@ -79,7 +124,6 @@ class FloatingButton(QWidget):
         y = screen.height() - 150
         self.move(x, y)
 
-    # allow dragging the floating button
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.drag_position = (
@@ -88,115 +132,273 @@ class FloatingButton(QWidget):
 
     def mouseMoveEvent(self, event):
         if event.buttons() == Qt.MouseButton.LeftButton:
-            self.move(event.globalPosition().toPoint() - self.drag_position)
+            self.move(
+                event.globalPosition().toPoint() - self.drag_position
+            )
 
 
 class OverlayWindow(QWidget):
-    def __init__(self, token: str):
+    def __init__(self, token: str, user_id: int):
         super().__init__()
         self.token = token
+        self.user_id = user_id
+        self.session_uuid = None
+        self.drag_position = QPoint()
 
-        # create floating button
         self.floating_btn = FloatingButton()
         self.floating_btn.clicked.connect(self.show_overlay)
 
         self.setup_ui()
 
     def setup_ui(self):
-        self.setWindowTitle("BarangAI Assistant")
-        self.setFixedSize(350, 520)
-
+        self.setWindowTitle("BarangAI")
+        self.setFixedSize(370, 580)
         self.setWindowFlags(
             Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.Tool
         )
-
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.position_window()
 
-        layout = QVBoxLayout()
+        # outer container — handles border radius and background
+        container = QWidget(self)
+        container.setGeometry(0, 0, 370, 580)
+        container.setObjectName("container")
+        container.setStyleSheet(f"""
+            QWidget#container {{
+                background-color: {DARK_BG};
+                border-radius: 16px;
+                border: 1px solid {DARK_BORDER};
+                font-family: 'Segoe UI', Arial, sans-serif;
+            }}
+        """)
 
-        # header
-        header_layout = QHBoxLayout()
+        # main layout — no margins, no spacing so sections fill edge to edge
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        header = QLabel("💬 BarangAI Assistant")
-        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        header_layout.addWidget(header)
+        # ── HEADER ──────────────────────────────────────────
+        header_widget = QWidget()
+        header_widget.setObjectName("header")
+        header_widget.setFixedHeight(56)
+        header_widget.setStyleSheet(f"""
+            QWidget#header {{
+                background-color: {DARK_CARD};
+                border-top-left-radius: 16px;
+                border-top-right-radius: 16px;
+                border-bottom: 1px solid {DARK_BORDER};
+            }}
+        """)
+
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(16, 0, 12, 0)
+        header_layout.setSpacing(8)
+
+        # green dot
+        dot = QLabel("●")
+        dot.setFixedWidth(14)
+        dot.setStyleSheet(f"color: {GREEN_PRIMARY}; font-size: 10px;")
+        header_layout.addWidget(dot)
+
+        # title
+        title = QLabel("BarangAI Assistant")
+        title.setStyleSheet(f"""
+            color: {TEXT_PRIMARY};
+            font-size: 14px;
+            font-weight: bold;
+        """)
+        header_layout.addWidget(title)
+        header_layout.addStretch()
 
         # minimize button
         minimize_btn = QPushButton("—")
-        minimize_btn.setFixedSize(30, 30)
+        minimize_btn.setFixedSize(28, 28)
         minimize_btn.setToolTip("Minimize")
+        minimize_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {TEXT_MUTED};
+                border: none;
+                border-radius: 6px;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_BORDER};
+                color: {TEXT_PRIMARY};
+            }}
+        """)
         minimize_btn.clicked.connect(self.hide_to_button)
         header_layout.addWidget(minimize_btn)
 
-        # close/quit button
-        quit_btn = QPushButton("✕")
-        quit_btn.setFixedSize(30, 30)
-        quit_btn.setToolTip("Quit BarangAI")
-        quit_btn.setStyleSheet("QPushButton { color: red; }")
-        quit_btn.clicked.connect(self.quit_app)
-        header_layout.addWidget(quit_btn)
+        # close button
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(28, 28)
+        close_btn.setToolTip("Quit BarangAI")
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {TEXT_MUTED};
+                border: none;
+                border-radius: 6px;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: #450a0a;
+                color: {RED_ERROR};
+            }}
+        """)
+        close_btn.clicked.connect(self.quit_app)
+        header_layout.addWidget(close_btn)
 
-        layout.addLayout(header_layout)
+        layout.addWidget(header_widget)
 
-        # chat display
+        # ── CHAT DISPLAY ─────────────────────────────────────
         self.chat_display = QTextEdit()
         self.chat_display.setReadOnly(True)
-        layout.addWidget(self.chat_display)
+        self.chat_display.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {DARK_BG};
+                color: {TEXT_PRIMARY};
+                border: none;
+                padding: 8px 10px;
+                font-size: 13px;
+                font-family: 'Segoe UI', Arial, sans-serif;
+            }}
+            QScrollBar:vertical {{
+                background: transparent;
+                width: 5px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {DARK_BORDER};
+                border-radius: 3px;
+                min-height: 20px;
+            }}
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+        """)
+        layout.addWidget(self.chat_display, stretch=1)
 
-        # input row
-        input_layout = QHBoxLayout()
+        # ── STATUS LABEL ──────────────────────────────────────
+        self.status_label = QLabel("")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setFixedHeight(18)
+        self.status_label.setStyleSheet(f"""
+            color: {TEXT_MUTED};
+            font-size: 11px;
+            background-color: {DARK_BG};
+            font-family: 'Segoe UI', Arial, sans-serif;
+        """)
+        layout.addWidget(self.status_label)
+
+        # ── INPUT AREA ────────────────────────────────────────
+        input_widget = QWidget()
+        input_widget.setObjectName("inputArea")
+        input_widget.setFixedHeight(62)
+        input_widget.setStyleSheet(f"""
+            QWidget#inputArea {{
+                background-color: {DARK_CARD};
+                border-top: 1px solid {DARK_BORDER};
+                border-bottom-left-radius: 16px;
+                border-bottom-right-radius: 16px;
+            }}
+        """)
+
+        input_layout = QHBoxLayout(input_widget)
+        input_layout.setContentsMargins(12, 10, 12, 10)
+        input_layout.setSpacing(8)
 
         self.input_field = QLineEdit()
         self.input_field.setPlaceholderText("Ask me anything...")
+        self.input_field.setFixedHeight(40)
         self.input_field.returnPressed.connect(self.send_message)
+        self.input_field.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {DARK_BG};
+                color: {TEXT_PRIMARY};
+                border: 1px solid {DARK_BORDER};
+                border-radius: 20px;
+                padding: 0 14px;
+                font-size: 13px;
+                font-family: 'Segoe UI', Arial, sans-serif;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {GREEN_PRIMARY};
+            }}
+        """)
         input_layout.addWidget(self.input_field)
 
-        send_btn = QPushButton("Send")
-        send_btn.clicked.connect(self.send_message)
-        input_layout.addWidget(send_btn)
+        self.send_btn = QPushButton("➤")
+        self.send_btn.setFixedSize(40, 40)
+        self.send_btn.clicked.connect(self.send_message)
+        self.send_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {GREEN_PRIMARY};
+                color: {DARK_BG};
+                border: none;
+                border-radius: 20px;
+                font-size: 16px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {GREEN_HOVER};
+            }}
+            QPushButton:pressed {{
+                background-color: #16a34a;
+            }}
+            QPushButton:disabled {{
+                background-color: {DARK_BORDER};
+                color: {TEXT_MUTED};
+            }}
+        """)
+        input_layout.addWidget(self.send_btn)
 
-        layout.addLayout(input_layout)
+        layout.addWidget(input_widget)
 
-        # status label
-        self.status_label = QLabel("")
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.status_label)
-
-        self.setLayout(layout)
-
+        # welcome message
         self.display_message(
             "BarangAI",
             "Hello! I am your BarangAI assistant. How can I help you today?"
         )
 
+    # ── DRAGGING THE OVERLAY ─────────────────────────────────
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_position = (
+                event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            )
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.MouseButton.LeftButton:
+            self.move(
+                event.globalPosition().toPoint() - self.drag_position
+            )
+
+    # ── WINDOW MANAGEMENT ────────────────────────────────────
     def position_window(self):
         screen = QApplication.primaryScreen().geometry()
-        x = screen.width() - 350 - 20
-        y = screen.height() - 520 - 60
+        x = screen.width() - 370 - 20
+        y = screen.height() - 580 - 60
         self.move(x, y)
 
     def hide_to_button(self):
-        # hide overlay, show floating button
         self.hide()
         self.floating_btn.show()
 
     def show_overlay(self):
-        # hide floating button, show overlay
         self.floating_btn.hide()
-        self.position_window()
         self.show()
         self.raise_()
         self.activateWindow()
 
     def quit_app(self):
-        if hasattr(self, 'worker') and self.worker.isRunning():
-            self.worker.terminate() # Force the thread to stop
-            self.worker.wait()      # Wait for it to actually vanish
-    
-        self.floating_btn.close()
+        self.floating_btn.hide()
         QApplication.quit()
 
+    # ── MESSAGING ────────────────────────────────────────────
     def send_message(self):
         user_message = self.input_field.text().strip()
         if not user_message:
@@ -205,29 +407,100 @@ class OverlayWindow(QWidget):
         self.display_message("You", user_message)
         self.input_field.clear()
         self.input_field.setEnabled(False)
-        self.status_label.setText("BarangAI is typing...")
+        self.send_btn.setEnabled(False)
+        self.status_label.setText("BarangAI is looking at your screen...")
 
-        self.worker = AIWorker(user_message, self.token)
+        screen_data = capture_screen() 
+
+        self.worker = AIWorker(
+            message=user_message,
+            screen_data=screen_data, 
+            user_id=self.user_id,
+            session_uuid=self.session_uuid,
+            token=self.token
+        )
         self.worker.response_ready.connect(self.handle_response)
         self.worker.start()
 
-    def handle_response(self, response: str):
+    def handle_response(self, result: dict):
         self.status_label.setText("")
         self.input_field.setEnabled(True)
+        self.send_btn.setEnabled(True)
         self.input_field.setFocus()
-        self.display_message("BarangAI", response)
+
+        if not result["success"]:
+            if result["response"] == "SESSION_EXPIRED":
+                self.display_message(
+                    "System",
+                    "Your session has expired. Please restart and login again."
+                )
+            else:
+                self.display_message("System", result["response"])
+            return
+
+        if result.get("session_uuid"):
+            self.session_uuid = result["session_uuid"]
+
+        self.display_message("BarangAI", result["response"])
 
     def display_message(self, sender: str, message: str):
         if sender == "You":
-            color = "#2196F3"
-        elif sender == "BarangAI":
-            color = "#4CAF50"
-        else:
-            color = "#FF9800"
+            # Right-aligned table for user messages
+            self.chat_display.append(f"""
+                <table width="100%" style="margin: 4px 0;">
+                    <tr>
+                        <td width="20%"></td> <td align="right">
+                            <table style="background-color: #14532d; border-radius: 8px;">
+                                <tr>
+                                    <td style="padding: 8px 12px; color: #4ade80; font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px;">
+                                        {message}
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                </table>
+            """)
 
-        self.chat_display.append(
-            f'<b style="color:{color}">{sender}:</b> {message}<br>'
-        )
+        elif sender == "BarangAI":
+            # Left-aligned table for AI messages
+            self.chat_display.append(f"""
+                <table width="100%" style="margin: 4px 0;">
+                    <tr>
+                        <td align="left">
+                            <div style="color: {TEXT_MUTED}; font-size: 10px; font-weight: bold; margin-bottom: 2px; letter-spacing: 0.5px;">
+                                BarangAI
+                            </div>
+                            <table style="background-color: {DARK_CARD}; border-radius: 8px; border: 1px solid {DARK_BORDER};">
+                                <tr>
+                                    <td style="padding: 8px 12px; color: {TEXT_PRIMARY}; font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px;">
+                                        {message}
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                        <td width="20%"></td> </tr>
+                </table>
+            """)
+        else:
+            # Centered system/error messages using the Table method
+            self.chat_display.append(f"""
+                <table width="100%" style="margin: 6px 0;">
+                    <tr>
+                        <td align="center">
+                            <table style="background-color: #450a0a; border-radius: 10px; border: 1px solid #7f1d1d;">
+                                <tr>
+                                    <td style="padding: 6px 14px; color: {RED_ERROR}; font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; font-weight: bold;">
+                                        ⚠️ {message}
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                </table>
+            """)
+
+        # Auto scroll to latest message
         self.chat_display.verticalScrollBar().setValue(
             self.chat_display.verticalScrollBar().maximum()
         )
