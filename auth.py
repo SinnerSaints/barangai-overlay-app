@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QPixmap, QFont, QColor
 from api_client import login
-
+from utils import save_auth_data, get_resource_path
 
 class LoginWorker(QThread):
     login_done = pyqtSignal(dict)
@@ -82,7 +82,7 @@ class LoginWindow(QWidget):
         layout.setSpacing(16)
 
         logo_label = QLabel()
-        logo_pixmap = QPixmap("assets/logo.png")
+        logo_pixmap = QPixmap(get_resource_path("assets/icon.png"))
         if not logo_pixmap.isNull():
             logo_label.setPixmap(
                 logo_pixmap.scaled(
@@ -169,8 +169,9 @@ class LoginWindow(QWidget):
 
     def handle_result(self, result: dict):
         if result["success"]:
-            self.is_logged_in = True # 1. MUST set this to True BEFORE calling close
-            self.on_login_success(result["access_token"], result["user_id"])
+            self.is_logged_in = True # MUST set this to True BEFORE calling close
+            save_auth_data(result["access_token"], result["user_id"], result["user_name"], result["user_role"])
+            self.on_login_success(result["access_token"], result["user_id"], result["user_name"], result["user_role"])
             self.close()
         else:
             self.status_label.setStyleSheet("font-size: 12px; color: #ef4444;")

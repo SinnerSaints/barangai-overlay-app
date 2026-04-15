@@ -1,13 +1,14 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QTextEdit, QLineEdit, QPushButton,
-    QLabel, QApplication
+    QLabel, QApplication, QMessageBox, 
+    QStackedWidget, QComboBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QPoint, QSize
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QIcon, QPixmap
 from screen_capture import capture_screen
 from api_client import send_message
-from utils import get_resource_path
+from utils import get_resource_path, clear_auth_data
 import ctypes
 import platform # added to check OS 
 
@@ -38,9 +39,9 @@ class AIWorker(QThread):
 
         # FOR DEBUG PURPOSES
         print("\n" + "="*40)
-        print(f"🗨️ USER MESSAGE : {self.message}")
-        print(f"🎯 ACTIVE WINDOW: {self.screen_data['active_window']}")
-        print(f"🧠 AI CONTEXT   : {self.screen_data['context']}")
+        print(f"USER MESSAGE : {self.message}")
+        print(f"ACTIVE WINDOW: {self.screen_data['active_window']}")
+        print(f"AI CONTEXT   : {self.screen_data['context']}")
         print("="*40 + "\n")
 
         # Simulate a tiny 1-second "thinking" delay
@@ -90,7 +91,7 @@ class FloatingButton(QWidget):
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
 
-        icon_path = get_resource_path("icon.png")
+        icon_path = get_resource_path("assets/icon.png")
         
         self.btn = QPushButton()
         self.btn.setFixedSize(55, 55)
@@ -142,10 +143,14 @@ class FloatingButton(QWidget):
 
 
 class OverlayWindow(QWidget):
-    def __init__(self, token: str, user_id: int):
+    logout_requested = pyqtSignal() # Signal for logout
+
+    def __init__(self, token: str, user_id: int, user_name: str, user_role: str):
         super().__init__()
         self.token = token
         self.user_id = user_id
+        self.user_name = user_name
+        self.user_role = user_role
         self.session_uuid = None
         self.drag_position = QPoint()
 
@@ -207,14 +212,24 @@ class OverlayWindow(QWidget):
         header_layout.addWidget(dot)
 
         # title
-        title = QLabel("BarangAI Assistant")
-        title.setStyleSheet(f"""
+        self.header_title = QLabel("BarangAI Assistant")
+        self.header_title.setStyleSheet(f"""
             color: {TEXT_PRIMARY};
             font-size: 14px;
             font-weight: bold;
         """)
-        header_layout.addWidget(title)
-        header_layout.addStretch()
+        header_layout.addWidget(self.header_title)
+
+        # setting button
+        self.settings_btn = QPushButton("⚙")
+        self.settings_btn.setFixedSize(28, 28)
+        self.settings_btn.setToolTip("Settings")
+        self.settings_btn.setStyleSheet(f"""
+            QPushButton {{ background-color: transparent; color: {TEXT_MUTED}; border: none; font-size: 16px; }}
+            QPushButton:hover {{ color: {TEXT_PRIMARY}; }}
+        """)
+        self.settings_btn.clicked.connect(self.toggle_settings)
+        header_layout.addWidget(self.settings_btn)
 
         # minimize button
         minimize_btn = QPushButton("—")
@@ -258,7 +273,16 @@ class OverlayWindow(QWidget):
 
         layout.addWidget(header_widget)
 
+        # Stack widget
+        self.stacked_widget = QStackedWidget()
+        layout.addWidget(self.stacked_widget)
+
         # ── CHAT DISPLAY ─────────────────────────────────────
+        chat_page = QWidget()
+        chat_layout = QVBoxLayout(chat_page)
+        chat_layout.setContentsMargins(0, 0, 0, 0)
+        chat_layout.setSpacing(0)
+
         self.chat_display = QTextEdit()
         self.chat_display.setReadOnly(True)
         self.chat_display.setStyleSheet(f"""
@@ -284,7 +308,7 @@ class OverlayWindow(QWidget):
                 height: 0px;
             }}
         """)
-        layout.addWidget(self.chat_display, stretch=1)
+        chat_layout.addWidget(self.chat_display, stretch=1)
 
         # ── STATUS LABEL ──────────────────────────────────────
         self.status_label = QLabel("")
@@ -296,7 +320,7 @@ class OverlayWindow(QWidget):
             background-color: {DARK_BG};
             font-family: 'Segoe UI', Arial, sans-serif;
         """)
-        layout.addWidget(self.status_label)
+        chat_layout.addWidget(self.status_label)
 
         # ── INPUT AREA ────────────────────────────────────────
         input_widget = QWidget()
@@ -360,13 +384,186 @@ class OverlayWindow(QWidget):
         """)
         input_layout.addWidget(self.send_btn)
 
-        layout.addWidget(input_widget)
+        chat_layout.addWidget(input_widget)
+        self.stacked_widget.addWidget(chat_page) # Add chat to page 0
+
+        # ── SETTINGS INTERFACE ───────────────────────
+        settings_page = QWidget()
+        settings_layout = QVBoxLayout(settings_page)
+        settings_layout.setContentsMargins(24, 32, 24, 24)
+        settings_layout.setSpacing(20)
+
+        # Settings Header
+        settings_title = QLabel("Account Preferences")
+        settings_title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 16px; font-weight: bold;")
+        settings_layout.addWidget(settings_title)
+        
+        # Profile Card
+        profile_card = QWidget()
+        profile_card.setObjectName("profileCard")
+        profile_card.setStyleSheet(f"""
+            QWidget#profileCard {{
+                background-color: {DARK_CARD};
+                border-radius: 12px;
+                border: 1px solid {DARK_BORDER};
+            }}
+        """)
+        profile_layout = QVBoxLayout(profile_card)
+        profile_layout.setContentsMargins(16, 16, 16, 16)
+        profile_layout.setSpacing(6)
+        
+        lbl_logged = QLabel("Logged in as")
+        lbl_logged.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; background: transparent;")
+        profile_layout.addWidget(lbl_logged)
+
+        name_role_layout = QHBoxLayout()
+        name_role_layout.setContentsMargins(0, 0, 0, 0)
+        
+        lbl_name = QLabel(self.user_name)
+        lbl_name.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 18px; font-weight: bold; background: transparent;")
+        name_role_layout.addWidget(lbl_name)
+        
+        # The Role Badge
+        role_badge = QLabel(self.user_role)
+        role_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        if self.user_role == "CAPTAIN":
+            text_color = "#60a5fa" # Soft Blue
+        elif self.user_role == "ADMIN":
+            text_color = "#a78bfa" # Soft Purple
+        else:
+            text_color = GREEN_PRIMARY
+            
+        role_badge.setStyleSheet(f"""
+            background-color: {DARK_BG};
+            color: {text_color};
+            border: 1px solid {DARK_BORDER};
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 10px;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+        """)
+        name_role_layout.addWidget(role_badge)
+        name_role_layout.addStretch() 
+        
+        profile_layout.addLayout(name_role_layout)
+        settings_layout.addWidget(profile_card)
+
+        # Language Placeholder
+        lang_card = QWidget()
+        lang_card.setObjectName("langCard")
+        lang_card.setStyleSheet(f"""
+            QWidget#langCard {{
+                background-color: {DARK_CARD};
+                border-radius: 12px;
+                border: 1px solid {DARK_BORDER};
+            }}
+        """)
+        lang_layout = QVBoxLayout(lang_card)
+        lang_layout.setContentsMargins(16, 16, 16, 16)
+        lang_layout.setSpacing(10)
+
+        lbl_lang_title = QLabel("AI Language")
+        lbl_lang_title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 14px; font-weight: bold; background: transparent;")
+        lang_layout.addWidget(lbl_lang_title)
+
+        lbl_lang_desc = QLabel("Set the default language you want the assistant to reply in.")
+        lbl_lang_desc.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; background: transparent;")
+        lbl_lang_desc.setWordWrap(True)
+        lang_layout.addWidget(lbl_lang_desc)
+
+        # The Interactive Dropdown
+        self.lang_dropdown = QComboBox()
+        self.lang_dropdown.addItems(["English", "Cebuano", "Tagalog"])
+        self.lang_dropdown.setFixedHeight(38)
+        self.lang_dropdown.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {DARK_BG};
+                color: {TEXT_PRIMARY};
+                border: 1px solid {DARK_BORDER};
+                border-radius: 6px;
+                padding: 4px 12px;
+                font-size: 13px;
+            }}
+            QComboBox:focus {{
+                border: 1px solid {GREEN_PRIMARY};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 30px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {DARK_BG};
+                color: {TEXT_PRIMARY};
+                selection-background-color: {DARK_BORDER};
+                border: 1px solid {DARK_BORDER};
+                outline: none;
+            }}
+        """)
+        # Connect to a placeholder function for future database updates
+        self.lang_dropdown.currentTextChanged.connect(self.on_language_changed)
+        lang_layout.addWidget(self.lang_dropdown)
+
+        settings_layout.addWidget(lang_card)
+        settings_layout.addStretch()
+        
+        # Logout Button
+        logout_btn = QPushButton("Log Out")
+        logout_btn.setFixedHeight(46)
+        logout_btn.setStyleSheet(f"""
+            QPushButton {{ 
+                background-color: transparent; 
+                color: {RED_ERROR}; 
+                border: 1px solid {RED_ERROR}; 
+                border-radius: 8px; 
+                font-size: 14px; 
+                font-weight: bold; 
+            }}
+            QPushButton:hover {{ 
+                background-color: #450a0a; 
+            }}
+            QPushButton:pressed {{
+                background-color: #7f1d1d;
+                color: {TEXT_PRIMARY};
+            }}
+        """)
+        logout_btn.clicked.connect(self.perform_logout)
+        settings_layout.addWidget(logout_btn)
+
+        self.stacked_widget.addWidget(settings_page) # Add settings to page 1
 
         # welcome message
         self.display_message(
             "BarangAI",
             "Hello! I am your BarangAI assistant. How can I help you today?"
         )
+
+        self.check_macos_permissions()
+
+    def toggle_settings(self):
+        """Flips between the Chat View (Index 0) and Settings View (Index 1)."""
+        if self.stacked_widget.currentIndex() == 0:
+            self.stacked_widget.setCurrentIndex(1)
+            self.header_title.setText("Settings")
+        else:
+            self.stacked_widget.setCurrentIndex(0)
+            self.header_title.setText("BarangAI Assistant")
+
+    def perform_logout(self):
+        """Clears the secure vault and tells main.py to show the login screen."""
+        clear_auth_data()
+        self.logout_requested.emit()
+
+    def on_language_changed(self, selected_language: str):
+        """
+        Placeholder function for future update.
+        Fires automatically whenever the user picks a new language.
+        """
+        print(f"User changed language preference to: {selected_language}")
+        
+        # In the future, you will trigger an API call here to save this 
+        # to the database so it syncs with the web app!
 
     # ── DRAGGING THE OVERLAY ─────────────────────────────────
     def mousePressEvent(self, event):
@@ -434,6 +631,7 @@ class OverlayWindow(QWidget):
 
         if not result["success"]:
             if result["response"] == "SESSION_EXPIRED":
+                clear_auth_data()
                 self.display_message(
                     "System",
                     "Your session has expired. Please restart and login again."
@@ -508,3 +706,45 @@ class OverlayWindow(QWidget):
         self.chat_display.verticalScrollBar().setValue(
             self.chat_display.verticalScrollBar().maximum()
         )
+
+    def check_macos_permissions(self):
+        if sys.platform == "darwin":
+            try:
+                import Quartz
+                
+                has_access = Quartz.CGPreflightScreenCaptureAccess()
+                
+                if not has_access:
+                    msg = QMessageBox(self)
+                    msg.setWindowTitle("Action Required: Screen Access")
+                    
+                    # --- NEW IMAGE CODE ---
+                    # Load the image using your resource path helper
+                    tutorial_image = QPixmap(get_resource_path("mac_toggle_tutorial.png"))
+                    
+                    # Check if the image loaded successfully
+                    if not tutorial_image.isNull():
+                        msg.setIconPixmap(tutorial_image.scaledToWidth(300))
+                    else:
+                        # Fallback if the image is missing from the assets folder
+                        msg.setIcon(QMessageBox.Icon.Warning)
+                    # ----------------------
+                    
+                    msg.setText("BarangAI needs your permission to see the screen.")
+                    msg.setInformativeText(
+                        "Click 'OK' to open your computer settings.\n\n"
+                        "Please find 'BarangAI' (or your Terminal) in the list and click the switch to turn it ON.\n\n"
+                        "After that, you may need to restart this app."
+                    )
+                    msg.exec()
+                    
+                    # This triggers the native macOS popup if it's their very first time
+                    Quartz.CGRequestScreenCaptureAccess()
+                    
+                    # Opens the exact Settings page for them
+                    os.system('open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"')
+                    
+            except ImportError:
+                print("Quartz module not found. Cannot check macOS permissions.")
+            except AttributeError:
+                pass
