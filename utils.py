@@ -5,7 +5,13 @@ import keyring
 SERVICE_NAME = "BarangAI"
 
 def get_resource_path(filename):
-    base_path = os.path.dirname(os.path.abspath(__file__))
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        
     return os.path.join(base_path, filename)
 
 def save_auth_data(token: str, user_id: int, user_name: str, user_role: str):
@@ -37,12 +43,3 @@ def clear_auth_data():
         keyring.delete_password(SERVICE_NAME, "user_role")
     except keyring.errors.PasswordDeleteError:
         pass
-
-def save_theme_preference(theme: str):
-    """Saves the theme preference (System, Dark, Light)"""
-    keyring.set_password(SERVICE_NAME, "theme_pref", theme)
-
-def load_theme_preference() -> str:
-    """Loads the theme preference, defaults to System"""
-    pref = keyring.get_password(SERVICE_NAME, "theme_pref")
-    return pref if pref else "System"
