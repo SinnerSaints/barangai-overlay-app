@@ -5,7 +5,7 @@ from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor
 from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
 from overlay import OverlayWindow
 from auth import LoginWindow 
-from utils import get_resource_path
+from utils import get_resource_path, load_auth_data
 
 class BeautifulSplash(QSplashScreen):
     def __init__(self, pixmap):
@@ -78,14 +78,30 @@ class BarangAIApp:
         self.opacity_anim.start()
 
     def show_login_after_splash(self):
+        saved_token, saved_user_id, saved_name, saved_role = load_auth_data()
+
+        if saved_token and saved_user_id:
+            self.start_overlay(saved_token, saved_user_id, saved_name, saved_role)
+            self.splash.finish(self.overlay_window)
+        else:
+            self.login_window = LoginWindow(on_login_success=self.start_overlay)
+            self.login_window.show()
+            self.splash.finish(self.login_window)
+
+    def start_overlay(self, token, user_id, user_name="Guest - Default", user_role="Barangay Official"):
+        self.overlay_window = OverlayWindow(token=token, user_id=user_id, user_name=user_name, user_role=user_role)
+        self.overlay_window.logout_requested.connect(self.handle_logout)
+        self.overlay_window.show()
+        self.setup_tray()
+
+    def handle_logout(self):
+        self.overlay_window.close()
+        self.overlay_window = None
+        self.tray_icon.hide()
+
         self.login_window = LoginWindow(on_login_success=self.start_overlay)
         self.login_window.show()
         self.splash.finish(self.login_window)
-
-    def start_overlay(self, token, user_id):
-        self.overlay_window = OverlayWindow(token=token, user_id=user_id)
-        self.overlay_window.show()
-        self.setup_tray()
 
     def setup_tray(self):
         self.tray_icon = QSystemTrayIcon(self.app_icon, self.app)
