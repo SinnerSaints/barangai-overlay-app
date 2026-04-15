@@ -1,7 +1,8 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QTextEdit, QLineEdit, QPushButton,
-    QLabel, QApplication, QMessageBox, QStackedWidget
+    QLabel, QApplication, QMessageBox, 
+    QStackedWidget, QComboBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QPoint, QSize
 from PyQt6.QtGui import QIcon, QPixmap
@@ -38,9 +39,9 @@ class AIWorker(QThread):
 
         # FOR DEBUG PURPOSES
         print("\n" + "="*40)
-        print(f"🗨️ USER MESSAGE : {self.message}")
-        print(f"🎯 ACTIVE WINDOW: {self.screen_data['active_window']}")
-        print(f"🧠 AI CONTEXT   : {self.screen_data['context']}")
+        print(f"USER MESSAGE : {self.message}")
+        print(f"ACTIVE WINDOW: {self.screen_data['active_window']}")
+        print(f"AI CONTEXT   : {self.screen_data['context']}")
         print("="*40 + "\n")
 
         # Simulate a tiny 1-second "thinking" delay
@@ -217,7 +218,7 @@ class OverlayWindow(QWidget):
         header_layout.addWidget(self.header_title)
 
         # setting button
-        self.settings_btn = QPushButton("⚙️")
+        self.settings_btn = QPushButton("⚙")
         self.settings_btn.setFixedSize(28, 28)
         self.settings_btn.setToolTip("Settings")
         self.settings_btn.setStyleSheet(f"""
@@ -383,77 +384,146 @@ class OverlayWindow(QWidget):
         chat_layout.addWidget(input_widget)
         self.stacked_widget.addWidget(chat_page) # Add chat to page 0
 
-        # Settings Interface
+        # ── SETTINGS INTERFACE ───────────────────────
         settings_page = QWidget()
         settings_layout = QVBoxLayout(settings_page)
-        settings_layout.setContentsMargins(20, 30, 20, 20)
-        settings_layout.setSpacing(15)
+        settings_layout.setContentsMargins(24, 32, 24, 24)
+        settings_layout.setSpacing(20)
 
+        # Settings Header
+        settings_title = QLabel("Account Preferences")
+        settings_title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 16px; font-weight: bold;")
+        settings_layout.addWidget(settings_title)
+        
         # Profile Card
         profile_card = QWidget()
-        profile_card.setStyleSheet(f"background-color: {DARK_CARD}; border-radius: 12px; border: 1px solid {DARK_BORDER};")
+        profile_card.setObjectName("profileCard")
+        profile_card.setStyleSheet(f"""
+            QWidget#profileCard {{
+                background-color: {DARK_CARD};
+                border-radius: 12px;
+                border: 1px solid {DARK_BORDER};
+            }}
+        """)
         profile_layout = QVBoxLayout(profile_card)
+        profile_layout.setContentsMargins(16, 16, 16, 16)
+        profile_layout.setSpacing(6)
         
-        lbl_logged = QLabel("Logged in as:")
-        lbl_logged.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px;")
+        lbl_logged = QLabel("Logged in as")
+        lbl_logged.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; background: transparent;")
         profile_layout.addWidget(lbl_logged)
 
-        # --- THIS IS THE ROLE BADGE LAYOUT YOU MISSED ---
         name_role_layout = QHBoxLayout()
         name_role_layout.setContentsMargins(0, 0, 0, 0)
         
         lbl_name = QLabel(self.user_name)
-        lbl_name.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 18px; font-weight: bold;")
+        lbl_name.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 18px; font-weight: bold; background: transparent;")
         name_role_layout.addWidget(lbl_name)
         
         # The Role Badge
         role_badge = QLabel(self.user_role)
         role_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        # Change badge color based on role
         if self.user_role == "CAPTAIN":
-            badge_color = "#3b82f6" # Blue for Captain
+            text_color = "#60a5fa" # Soft Blue
         elif self.user_role == "ADMIN":
-            badge_color = "#8b5cf6" # Purple for Admin
+            text_color = "#a78bfa" # Soft Purple
         else:
-            badge_color = "#10b981" # Green for Official
+            text_color = GREEN_PRIMARY
             
         role_badge.setStyleSheet(f"""
-            background-color: {badge_color}33;
-            color: {badge_color};
-            border: 1px solid {badge_color};
+            background-color: {DARK_BG};
+            color: {text_color};
+            border: 1px solid {DARK_BORDER};
             border-radius: 6px;
-            padding: 2px 8px;
+            padding: 4px 10px;
             font-size: 10px;
             font-weight: bold;
+            letter-spacing: 0.5px;
         """)
         name_role_layout.addWidget(role_badge)
-        name_role_layout.addStretch() # Push everything to the left
+        name_role_layout.addStretch() 
         
         profile_layout.addLayout(name_role_layout)
-
         settings_layout.addWidget(profile_card)
 
         # Language Placeholder
         lang_card = QWidget()
-        lang_card.setStyleSheet(f"background-color: {DARK_CARD}; border-radius: 12px; border: 1px solid {DARK_BORDER};")
+        lang_card.setObjectName("langCard")
+        lang_card.setStyleSheet(f"""
+            QWidget#langCard {{
+                background-color: {DARK_CARD};
+                border-radius: 12px;
+                border: 1px solid {DARK_BORDER};
+            }}
+        """)
         lang_layout = QVBoxLayout(lang_card)
-        lbl_lang = QLabel("Preferred Language")
-        lbl_lang.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px;")
-        lang_layout.addWidget(lbl_lang)
-        lbl_coming_soon = QLabel("Feature coming soon")
-        lbl_coming_soon.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 14px;")
-        lang_layout.addWidget(lbl_coming_soon)
-        settings_layout.addWidget(lang_card)
+        lang_layout.setContentsMargins(16, 16, 16, 16)
+        lang_layout.setSpacing(10)
 
+        lbl_lang_title = QLabel("AI Language")
+        lbl_lang_title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 14px; font-weight: bold; background: transparent;")
+        lang_layout.addWidget(lbl_lang_title)
+
+        lbl_lang_desc = QLabel("Set the default language you want the assistant to reply in.")
+        lbl_lang_desc.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; background: transparent;")
+        lbl_lang_desc.setWordWrap(True)
+        lang_layout.addWidget(lbl_lang_desc)
+
+        # The Interactive Dropdown
+        self.lang_dropdown = QComboBox()
+        self.lang_dropdown.addItems(["English", "Cebuano", "Tagalog"])
+        self.lang_dropdown.setFixedHeight(38)
+        self.lang_dropdown.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {DARK_BG};
+                color: {TEXT_PRIMARY};
+                border: 1px solid {DARK_BORDER};
+                border-radius: 6px;
+                padding: 4px 12px;
+                font-size: 13px;
+            }}
+            QComboBox:focus {{
+                border: 1px solid {GREEN_PRIMARY};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 30px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {DARK_BG};
+                color: {TEXT_PRIMARY};
+                selection-background-color: {DARK_BORDER};
+                border: 1px solid {DARK_BORDER};
+                outline: none;
+            }}
+        """)
+        # Connect to a placeholder function for future database updates
+        self.lang_dropdown.currentTextChanged.connect(self.on_language_changed)
+        lang_layout.addWidget(self.lang_dropdown)
+
+        settings_layout.addWidget(lang_card)
         settings_layout.addStretch()
         
         # Logout Button
         logout_btn = QPushButton("Log Out")
         logout_btn.setFixedHeight(46)
         logout_btn.setStyleSheet(f"""
-            QPushButton {{ background-color: {DARK_CARD}; color: {RED_ERROR}; border: 1px solid {RED_ERROR}; border-radius: 8px; font-size: 14px; font-weight: bold; }}
-            QPushButton:hover {{ background-color: #450a0a; }}
+            QPushButton {{ 
+                background-color: transparent; 
+                color: {RED_ERROR}; 
+                border: 1px solid {RED_ERROR}; 
+                border-radius: 8px; 
+                font-size: 14px; 
+                font-weight: bold; 
+            }}
+            QPushButton:hover {{ 
+                background-color: #450a0a; 
+            }}
+            QPushButton:pressed {{
+                background-color: #7f1d1d;
+                color: {TEXT_PRIMARY};
+            }}
         """)
         logout_btn.clicked.connect(self.perform_logout)
         settings_layout.addWidget(logout_btn)
@@ -481,6 +551,16 @@ class OverlayWindow(QWidget):
         """Clears the secure vault and tells main.py to show the login screen."""
         clear_auth_data()
         self.logout_requested.emit()
+
+    def on_language_changed(self, selected_language: str):
+        """
+        Placeholder function for future update.
+        Fires automatically whenever the user picks a new language.
+        """
+        print(f"User changed language preference to: {selected_language}")
+        
+        # In the future, you will trigger an API call here to save this 
+        # to the database so it syncs with the web app!
 
     # ── DRAGGING THE OVERLAY ─────────────────────────────────
     def mousePressEvent(self, event):
