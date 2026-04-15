@@ -1,12 +1,37 @@
-import pygetwindow as gw
 import pyautogui
 import base64
 from io import BytesIO
 import threading
 import time
+import sys
+
+if sys.platform == "win32":
+    import pygetwindow as gw
+elif sys.platform == "darwin":
+    try:
+        from AppKit import NSWorkspace
+    except ImportError:
+        print("macOS dependencies missing. Run: pip install pyobjc")
 
 # Global variable to store the last app the user was looking at
 last_external_window_title = "Initializing..."
+
+def get_active_window_title() -> str:
+    if sys.platform == "win32":
+        try:
+            active_window = gw.getActiveWindow()
+            return active_window.title if active_window and active_window.title else ""
+        except Exception:
+            return ""
+            
+    elif sys.platform == "darwin":
+        try:
+            active_app = NSWorkspace.sharedWorkspace().activeApplication()
+            return active_app.get('NSApplicationName', "") if active_app else ""
+        except Exception:
+            return ""
+            
+    return "Unknown OS"
 
 def window_tracker_daemon():
     """
@@ -16,18 +41,15 @@ def window_tracker_daemon():
     global last_external_window_title
     while True:
         try:
-            active_window = gw.getActiveWindow()
-            if active_window and active_window.title:
-                title = active_window.title
-                # Only update the memory if the user is NOT looking at our overlay
-                if "barangai" not in title.lower():
-                    last_external_window_title = title
+            title = get_active_window_title()
+            if title and "barangai" not in title.lower():
+                last_external_window_title = title
         except Exception:
-            pass # Ignore temporary OS errors if a window is closing
+            pass
         
-        time.sleep(0.5) # Check twice a second
+        time.sleep(0.5)
 
-# Start the background tracker the moment this file is imported
+# Start the background tracker
 tracker_thread = threading.Thread(target=window_tracker_daemon, daemon=True)
 tracker_thread.start()
 
@@ -36,12 +58,13 @@ def capture_screen() -> dict:
     global last_external_window_title
     
     try:
-        current_active = gw.getActiveWindow()
+        # Do a quick check right before capture to ensure context is fresh
+        title = get_active_window_title()
+        if title and "barangai" not in title.lower():
+            last_external_window_title = title
 
-        if current_active and current_active.title:
-            if "barangai" not in current_active.title.lower():
-                last_external_window_title = current_active.title
-
+        # PyAutoGUI handles the actual screenshot on both platforms 
+        # (Provided macOS has given screen recording permissions)
         screenshot = pyautogui.screenshot()
 
         buffer = BytesIO()
