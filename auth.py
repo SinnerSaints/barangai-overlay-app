@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QPixmap, QFont, QColor
 from api_client import login
-from utils import save_auth_data
+from utils import save_auth_data, get_resource_path
 
 class LoginWorker(QThread):
     login_done = pyqtSignal(dict)
@@ -82,7 +82,7 @@ class LoginWindow(QWidget):
         layout.setSpacing(16)
 
         logo_label = QLabel()
-        logo_pixmap = QPixmap("assets/logo.png")
+        logo_pixmap = QPixmap(get_resource_path("assets/logo.png"))
         if not logo_pixmap.isNull():
             logo_label.setPixmap(
                 logo_pixmap.scaled(
