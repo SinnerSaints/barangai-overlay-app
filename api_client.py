@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 SERVER_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
-SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://localhost:8001")
+SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://localhost:8002") # Adjusted to point to AI service endpoint
 
 
 def login(email: str, password: str) -> dict:

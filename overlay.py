@@ -9,6 +9,7 @@ from screen_capture import capture_screen
 from api_client import send_message
 from utils import get_resource_path
 import ctypes
+import platform # added to check OS 
 
 DARK_BG       = "#0f1923"
 DARK_CARD     = "#1a2535"
@@ -81,7 +82,10 @@ class FloatingButton(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         hwnd = int(self.winId())
-        ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x11)
+        # ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x11) - Changed it so I can run it ony Mac
+        if platform.system() == "Windows":
+            hwnd = int(self.winId())
+            ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x11)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
