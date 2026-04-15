@@ -47,7 +47,7 @@ class BarangAIApp:
         self.app = QApplication(sys.argv)
         self.app.setQuitOnLastWindowClosed(False)
 
-        self.icon_path = get_resource_path("icon.png")
+        self.icon_path = get_resource_path("assets/icon.png")
         if os.path.exists(self.icon_path):
             self.app_icon = QIcon(self.icon_path)
             splash_pixmap = QPixmap(self.icon_path)

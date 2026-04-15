@@ -88,7 +88,7 @@ class FloatingButton(QWidget):
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
 
-        icon_path = get_resource_path("icon.png")
+        icon_path = get_resource_path("assets/icon.png")
         
         self.btn = QPushButton()
         self.btn.setFixedSize(55, 55)

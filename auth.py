@@ -82,7 +82,7 @@ class LoginWindow(QWidget):
         layout.setSpacing(16)
 
         logo_label = QLabel()
-        logo_pixmap = QPixmap(get_resource_path("assets/logo.png"))
+        logo_pixmap = QPixmap(get_resource_path("assets/icon.png"))
         if not logo_pixmap.isNull():
             logo_label.setPixmap(
                 logo_pixmap.scaled(
