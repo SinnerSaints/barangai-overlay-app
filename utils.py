@@ -37,3 +37,12 @@ def clear_auth_data():
         keyring.delete_password(SERVICE_NAME, "user_role")
     except keyring.errors.PasswordDeleteError:
         pass
+
+def save_theme_preference(theme: str):
+    """Saves the theme preference (System, Dark, Light)"""
+    keyring.set_password(SERVICE_NAME, "theme_pref", theme)
+
+def load_theme_preference() -> str:
+    """Loads the theme preference, defaults to System"""
+    pref = keyring.get_password(SERVICE_NAME, "theme_pref")
+    return pref if pref else "System"

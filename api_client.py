@@ -19,7 +19,7 @@ SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://localhost:8001")
 
 def login(email: str, password: str) -> dict:
     try:
-        # Step 1: Hit the Login Endpoint to get user details
+        # Hit the Login Endpoint to get user details
         login_response = requests.post(
             f"{SERVER_URL}/accounts/login/",
             json={"email": email, "password": password},
@@ -31,13 +31,12 @@ def login(email: str, password: str) -> dict:
 
         login_data = login_response.json()
 
-        # 🚨 FLASHLIGHT: Prints exactly what your backend is sending!
         print("\n=== DEBUG: BACKEND LOGIN RESPONSE ===")
         print(f"Type: {type(login_data)}")
         print(f"Data: {login_data}")
         print("=====================================\n")
 
-        # Step 2: Hit the Token Endpoint to get the actual JWT
+        # Hit the Token Endpoint to get the actual JWT
         token_response = requests.post(
             f"{SERVER_URL}/accounts/token/",
             json={"email": email, "password": password},
@@ -49,13 +48,12 @@ def login(email: str, password: str) -> dict:
             
         token_data = token_response.json()
 
-        # --- EXTRACT DATA SAFELY ---
+        # EXTRACT DATA SAFELY
         user_id = login_data.get("id", 0)
         first_name = login_data.get("first_name", "")
         last_name = login_data.get("last_name", "")
         user_role = login_data.get("role", "OFFICIAL").upper()
 
-        # Format the display name (Fallback to their email if names are empty)
         if first_name or last_name:
             display_name = f"{first_name} {last_name}".strip()
         else:
