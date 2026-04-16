@@ -7,12 +7,13 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QPoint, QSize
 from PyQt6.QtGui import QIcon, QPixmap
 from screen_capture import capture_screen
-from api_client import send_message
+from api_client import send_message, update_user_preference
 from utils import get_resource_path, clear_auth_data
 import ctypes
 import platform # added to check OS 
 import sys
 import os
+import markdown
 
 DARK_BG       = "#0f1923"
 DARK_CARD     = "#1a2535"
@@ -28,13 +29,15 @@ RED_ERROR     = "#ef4444"
 class AIWorker(QThread):
     response_ready = pyqtSignal(dict)
 
-    def __init__(self, message, screen_data, user_id, session_uuid, token):
+    def __init__(self, message, screen_data, user_id, session_uuid, token, user_name="User", preferred_language="Default"):
         super().__init__()
         self.message = message
         self.screen_data = screen_data
         self.user_id = user_id
         self.session_uuid = session_uuid
         self.token = token
+        self.user_name = user_name
+        self.preferred_language = preferred_language
 
     def run(self):
         screenshot_b64 = self.screen_data.get("screenshot")
@@ -54,7 +57,9 @@ class AIWorker(QThread):
             screenshot_b64=screenshot_b64,
             user_id=self.user_id,
             session_uuid=self.session_uuid,
-            token=self.token
+            token=self.token,
+            user_name=self.user_name,
+            preferred_language=self.preferred_language
         )
 
         '''
@@ -147,7 +152,7 @@ class FloatingButton(QWidget):
 class OverlayWindow(QWidget):
     logout_requested = pyqtSignal() # Signal for logout
 
-    def __init__(self, token: str, user_id: int, user_name: str, user_role: str):
+    def __init__(self, token: str, user_id: int, user_name: str, user_role: str, preferred_language: str = "Default"):
         super().__init__()
         self.token = token
         self.user_id = user_id
@@ -155,6 +160,7 @@ class OverlayWindow(QWidget):
         self.user_role = user_role
         self.session_uuid = None
         self.drag_position = QPoint()
+        self.preferred_language = preferred_language
 
         self.floating_btn = FloatingButton()
         self.floating_btn.clicked.connect(self.show_overlay)
@@ -294,20 +300,34 @@ class OverlayWindow(QWidget):
                 border: none;
                 padding: 8px 10px;
                 font-size: 13px;
-                font-family: 'Segoe UI', Arial, sans-serif;
             }}
+            /* These styles apply to the HTML generated from Markdown */
+            h3 {{ color: {GREEN_PRIMARY}; margin-top: 10px; margin-bottom: 5px; font-size: 14px; }}
+            ul, ol {{ margin-left: 15px; padding-left: 0px; }}
+            li {{ margin-bottom: 5px; }}
+            b {{ color: {GREEN_PRIMARY}; }}
             QScrollBar:vertical {{
-                background: transparent;
-                width: 5px;
+                background: {DARK_BG};
+                width: 10px;
+                margin: 0px 0px 0px 0px;
             }}
             QScrollBar::handle:vertical {{
                 background: {DARK_BORDER};
-                border-radius: 3px;
+                border-radius: 5px;
                 min-height: 20px;
+                margin: 2px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background-color: {TEXT_MUTED};
             }}
             QScrollBar::add-line:vertical,
             QScrollBar::sub-line:vertical {{
                 height: 0px;
+                background: none;
+            }}
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {{
+                background: none;
             }}
         """)
         chat_layout.addWidget(self.chat_display, stretch=1)
@@ -477,7 +497,7 @@ class OverlayWindow(QWidget):
 
         # The Interactive Dropdown
         self.lang_dropdown = QComboBox()
-        self.lang_dropdown.addItems(["English", "Cebuano", "Tagalog"])
+        self.lang_dropdown.addItems(["Default", "English", "Cebuano", "Tagalog"])
         self.lang_dropdown.setFixedHeight(38)
         self.lang_dropdown.setStyleSheet(f"""
             QComboBox {{
@@ -503,8 +523,15 @@ class OverlayWindow(QWidget):
                 outline: none;
             }}
         """)
+
+        index = self.lang_dropdown.findText(self.preferred_language, Qt.MatchFlag.MatchFixedString)
+        if index >= 0:
+            self.lang_dropdown.setCurrentIndex(index)
+        else:
+            self.lang_dropdown.setCurrentIndex(0) # Fallback to Default
+
         # Connect to a placeholder function for future database updates
-        self.lang_dropdown.currentTextChanged.connect(self.on_language_changed)
+        self.lang_dropdown.currentTextChanged.connect(self.sync_language_to_db)
         lang_layout.addWidget(self.lang_dropdown)
 
         settings_layout.addWidget(lang_card)
@@ -614,13 +641,17 @@ class OverlayWindow(QWidget):
         self.status_label.setText("BarangAI is looking at your screen...")
 
         screen_data = capture_screen() 
+        
+        selected_lang = self.lang_dropdown.currentText().lower()
 
         self.worker = AIWorker(
             message=user_message,
             screen_data=screen_data, 
             user_id=self.user_id,
             session_uuid=self.session_uuid,
-            token=self.token
+            token=self.token,
+            user_name=self.user_name,
+            preferred_language=selected_lang
         )
         self.worker.response_ready.connect(self.handle_response)
         self.worker.start()
@@ -667,6 +698,8 @@ class OverlayWindow(QWidget):
             """)
 
         elif sender == "BarangAI":
+            html_message = markdown.markdown(message, extensions=['extra', 'nl2br'])
+
             # Left-aligned table for AI messages
             self.chat_display.append(f"""
                 <table width="100%" style="margin: 4px 0;">
@@ -677,8 +710,8 @@ class OverlayWindow(QWidget):
                             </div>
                             <table style="background-color: {DARK_CARD}; border-radius: 8px; border: 1px solid {DARK_BORDER};">
                                 <tr>
-                                    <td style="padding: 8px 12px; color: {TEXT_PRIMARY}; font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px;">
-                                        {message}
+                                    <td style="padding: 10px 14px; color: {TEXT_PRIMARY}; font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; line-height: 1.5;">
+                                        {html_message}
                                     </td>
                                 </tr>
                             </table>
@@ -750,3 +783,24 @@ class OverlayWindow(QWidget):
                 print("Quartz module not found. Cannot check macOS permissions.")
             except AttributeError:
                 pass
+
+    def sync_language_to_db(self):
+        new_lang = self.lang_dropdown.currentText().lower()
+
+        success = update_user_preference(self.token, self.user_id, new_lang)
+
+        if success:
+            print(f"Successfully updated {new_lang} for User {self.user_id}")
+            self.preferred_language = new_lang
+
+            from utils import save_auth_data
+            save_auth_data(
+                token=self.token, 
+                user_id=self.user_id, 
+                user_name=self.user_name, 
+                user_role=self.user_role, 
+                preferred_language=new_lang
+            )
+            print("Auth data updated.")
+        else:
+            print("Failed to sync language preference to the cloud.")
