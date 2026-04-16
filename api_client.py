@@ -4,18 +4,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SERVER_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
-SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://localhost:8002") # Adjusted to point to AI service endpoint
-
-
-import requests
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
-
-SERVER_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
-SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://localhost:8001")
+SERVER_URL = os.getenv("BACKEND_URL", "https://barangaibackend-production.up.railway.app/")
+SERVICE_URL = os.getenv("AI_SERVICE_URL", "https://barangai-service-openai-production.up.railway.app/")
 
 def login(email: str, password: str) -> dict:
     try:
