@@ -11,16 +11,10 @@ from api_client import send_message, update_user_preference
 from utils import get_resource_path, clear_auth_data
 import platform
 import ctypes
-<<<<<<< HEAD
-import sys
-import os
-
-=======
 import platform # added to check OS 
 import sys
 import os
 import markdown
->>>>>>> eba86ab0ea921d9c73fe97b41b4452a5a711745c
 
 DARK_BG       = "#0f1923"
 DARK_CARD     = "#1a2535"
