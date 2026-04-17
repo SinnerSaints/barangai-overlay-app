@@ -9,8 +9,11 @@ from PyQt6.QtGui import QIcon, QPixmap
 from screen_capture import capture_screen
 from api_client import send_message
 from utils import get_resource_path, clear_auth_data
+import platform
 import ctypes
-import platform # added to check OS 
+import sys
+import os
+
 
 DARK_BG       = "#0f1923"
 DARK_CARD     = "#1a2535"
