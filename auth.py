@@ -170,8 +170,8 @@ class LoginWindow(QWidget):
     def handle_result(self, result: dict):
         if result["success"]:
             self.is_logged_in = True # MUST set this to True BEFORE calling close
-            save_auth_data(result["access_token"], result["user_id"], result["user_name"], result["user_role"])
-            self.on_login_success(result["access_token"], result["user_id"], result["user_name"], result["user_role"])
+            save_auth_data(result["access_token"], result["user_id"], result["user_name"], result["user_role"], result["preferred_language"])
+            self.on_login_success(result["access_token"], result["user_id"], result["user_name"], result["user_role"], result["preferred_language"])
             self.close()
         else:
             self.status_label.setStyleSheet("font-size: 12px; color: #ef4444;")

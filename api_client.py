@@ -4,18 +4,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SERVER_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
-SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://localhost:8002") # Adjusted to point to AI service endpoint
-
-
-import requests
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
-
-SERVER_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
-SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://localhost:8001")
+SERVER_URL = os.getenv("BACKEND_URL", "https://barangaibackend-production.up.railway.app/")
+SERVICE_URL = os.getenv("AI_SERVICE_URL",  "https://barangai-service-openai-production.up.railway.app/")
 
 def login(email: str, password: str) -> dict:
     try:
@@ -53,6 +43,7 @@ def login(email: str, password: str) -> dict:
         first_name = login_data.get("first_name", "")
         last_name = login_data.get("last_name", "")
         user_role = login_data.get("role", "OFFICIAL").upper()
+        preferred_language = login_data.get("preferred_language", "Default")
 
         if first_name or last_name:
             display_name = f"{first_name} {last_name}".strip()
@@ -64,7 +55,8 @@ def login(email: str, password: str) -> dict:
             "access_token": token_data.get("access"),
             "user_id": user_id,
             "user_name": display_name,
-            "user_role": user_role
+            "user_role": user_role,
+            "preferred_language": preferred_language
         }
 
     except requests.exceptions.ConnectionError:
@@ -77,17 +69,24 @@ def send_message(
     screenshot_b64: str,
     user_id: int,
     session_uuid: str,
-    token: str
+    token: str,
+    user_name: str,
+    preferred_language: str,
 ) -> dict:
     """
     Sends message + screenshot to FastAPI chat endpoint.
     Returns full response dict.
     """
     try:
+        if callable(user_id):
+            return {"success": False, "response": "Local Error: user_id is a function, not a number. Check self.user_id in overlay.py"}
+
         payload = {
             "message": message,
             "user_id": int(user_id),
             "screenshot": screenshot_b64,
+            "user_name": user_name,
+            "preferred_language": preferred_language,
         }
 
         if session_uuid:
@@ -122,3 +121,19 @@ def send_message(
     except Exception as e:
         return {"success": False, "response": f"Unexpected error: {str(e)}"}
     
+def update_user_preference(token: str, user_id: int, preferred_language: str) -> bool:
+    """Uses the existing UpdateUserView to sync the language."""
+    try:
+        url = f"{SERVER_URL}/accounts/users/{user_id}/update/" 
+        
+        headers = {"Authorization": f"Bearer {token}"}
+        payload = {"preferred_language": preferred_language}
+
+        response = requests.patch(url, json=payload, headers=headers, timeout=10)
+
+        print(payload)
+        
+        return response.status_code == 200
+    except Exception as e:
+        print(f"API Error: {e}")
+        return False

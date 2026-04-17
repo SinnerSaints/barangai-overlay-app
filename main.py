@@ -78,18 +78,18 @@ class BarangAIApp:
         self.opacity_anim.start()
 
     def show_login_after_splash(self):
-        saved_token, saved_user_id, saved_name, saved_role = load_auth_data()
+        saved_token, saved_user_id, saved_name, saved_role, saved_lang = load_auth_data()
 
         if saved_token and saved_user_id:
-            self.start_overlay(saved_token, saved_user_id, saved_name, saved_role)
+            self.start_overlay(saved_token, saved_user_id, saved_name, saved_role, saved_lang)
             self.splash.finish(self.overlay_window)
         else:
             self.login_window = LoginWindow(on_login_success=self.start_overlay)
             self.login_window.show()
             self.splash.finish(self.login_window)
 
-    def start_overlay(self, token, user_id, user_name="Guest - Default", user_role="Barangay Official"):
-        self.overlay_window = OverlayWindow(token=token, user_id=user_id, user_name=user_name, user_role=user_role)
+    def start_overlay(self, token, user_id, user_name="Guest - Default", user_role="OFFICIAL", pref_lang="Default"):
+        self.overlay_window = OverlayWindow(token=token, user_id=user_id, user_name=user_name, user_role=user_role, preferred_language=pref_lang)
         self.overlay_window.logout_requested.connect(self.handle_logout)
         self.overlay_window.show()
         self.setup_tray()
