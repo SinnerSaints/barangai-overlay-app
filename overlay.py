@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QLabel, QApplication, QMessageBox, 
     QStackedWidget, QComboBox
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QPoint, QSize
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QPoint, QSize, QTimer
 from PyQt6.QtGui import QIcon, QPixmap
 from screen_capture import capture_screen
 from api_client import send_message, update_user_preference
@@ -164,6 +164,13 @@ class OverlayWindow(QWidget):
 
         self.floating_btn = FloatingButton()
         self.floating_btn.clicked.connect(self.show_overlay)
+
+        self.chat_history_html = ""
+        self.full_ai_text = ""
+        self.typewriter_index = 0
+        
+        self.typewriter_timer = QTimer()
+        self.typewriter_timer.timeout.connect(self.update_typewriter)
 
         self.setup_ui()
 
@@ -636,12 +643,12 @@ class OverlayWindow(QWidget):
 
         self.display_message("You", user_message)
         self.input_field.clear()
+
         self.input_field.setEnabled(False)
         self.send_btn.setEnabled(False)
-        self.status_label.setText("BarangAI is looking at your screen...")
+        self.status_label.setText("BIDA is thinking...")
 
         screen_data = capture_screen() 
-        
         selected_lang = self.lang_dropdown.currentText().lower()
 
         self.worker = AIWorker(
@@ -658,17 +665,17 @@ class OverlayWindow(QWidget):
 
     def handle_response(self, result: dict):
         self.status_label.setText("")
-        self.input_field.setEnabled(True)
-        self.send_btn.setEnabled(True)
-        self.input_field.setFocus()
 
+        # Handle errors immediately
         if not result["success"]:
+            self.input_field.setEnabled(True)
+            self.send_btn.setEnabled(True)
+            self.input_field.setFocus()
+            
             if result["response"] == "SESSION_EXPIRED":
+                from utils import clear_auth_data
                 clear_auth_data()
-                self.display_message(
-                    "System",
-                    "Your session has expired. Please restart and login again."
-                )
+                self.display_message("System", "Your session has expired. Please restart and login again.")
             else:
                 self.display_message("System", result["response"])
             return
@@ -676,71 +683,114 @@ class OverlayWindow(QWidget):
         if result.get("session_uuid"):
             self.session_uuid = result["session_uuid"]
 
-        self.display_message("BarangAI", result["response"])
+        # Start the typing animation instead of showing it all at once
+        self.full_ai_text = result["response"]
+        self.typewriter_index = 0
+        self.typewriter_timer.start(15) # Speed: 15 milliseconds per tick
+
+    def update_typewriter(self):
+        # Advance the typing index (increase chunk_size to type faster)
+        chunk_size = 2 
+        self.typewriter_index += chunk_size
+        
+        if self.typewriter_index >= len(self.full_ai_text):
+            # Typing is complete
+            self.typewriter_index = len(self.full_ai_text)
+            self.typewriter_timer.stop()
+            
+            # Commit the final fully-rendered message to the history string
+            self.chat_history_html += self.format_ai_message(self.full_ai_text)
+            
+            # Re-enable input box
+            self.input_field.setEnabled(True)
+            self.send_btn.setEnabled(True)
+            self.input_field.setFocus()
+            
+            # Render final state
+            self.chat_display.setHtml(self.chat_history_html)
+            self.scroll_to_bottom()
+        else:
+            # Typing is in progress: Render the partial text
+            current_text = self.full_ai_text[:self.typewriter_index]
+            
+            # Combine locked history with the current typing bubble
+            preview_html = self.chat_history_html + self.format_ai_message(current_text)
+            
+            self.chat_display.setHtml(preview_html)
+            self.scroll_to_bottom()
 
     def display_message(self, sender: str, message: str):
+        """Immediately displays messages that don't need a typing effect (User, System, Welcome)."""
         if sender == "You":
-            # Right-aligned table for user messages
-            self.chat_display.append(f"""
-                <table width="100%" style="margin: 4px 0;">
-                    <tr>
-                        <td width="20%"></td> <td align="right">
-                            <table style="background-color: #14532d; border-radius: 8px;">
-                                <tr>
-                                    <td style="padding: 8px 12px; color: #4ade80; font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px;">
-                                        {message}
-                                    </td>
-                                </tr>
-                            </table>
-                        </td>
-                    </tr>
-                </table>
-            """)
-
+            self.chat_history_html += self.format_user_message(message)
         elif sender == "BarangAI":
-            html_message = markdown.markdown(message, extensions=['extra', 'nl2br'])
-
-            # Left-aligned table for AI messages
-            self.chat_display.append(f"""
-                <table width="100%" style="margin: 4px 0;">
-                    <tr>
-                        <td align="left">
-                            <div style="color: {TEXT_MUTED}; font-size: 10px; font-weight: bold; margin-bottom: 2px; letter-spacing: 0.5px;">
-                                BarangAI
-                            </div>
-                            <table style="background-color: {DARK_CARD}; border-radius: 8px; border: 1px solid {DARK_BORDER};">
-                                <tr>
-                                    <td style="padding: 10px 14px; color: {TEXT_PRIMARY}; font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; line-height: 1.5;">
-                                        {html_message}
-                                    </td>
-                                </tr>
-                            </table>
-                        </td>
-                        <td width="20%"></td> </tr>
-                </table>
-            """)
+            self.chat_history_html += self.format_ai_message(message)
         else:
-            # Centered system/error messages using the Table method
-            self.chat_display.append(f"""
-                <table width="100%" style="margin: 6px 0;">
-                    <tr>
-                        <td align="center">
-                            <table style="background-color: #450a0a; border-radius: 10px; border: 1px solid #7f1d1d;">
-                                <tr>
-                                    <td style="padding: 6px 14px; color: {RED_ERROR}; font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; font-weight: bold;">
-                                        ⚠️ {message}
-                                    </td>
-                                </tr>
-                            </table>
-                        </td>
-                    </tr>
-                </table>
-            """)
+            self.chat_history_html += self.format_system_message(message)
 
-        # Auto scroll to latest message
-        self.chat_display.verticalScrollBar().setValue(
-            self.chat_display.verticalScrollBar().maximum()
-        )
+        self.chat_display.setHtml(self.chat_history_html)
+        self.scroll_to_bottom()
+
+    def scroll_to_bottom(self):
+        scrollbar = self.chat_display.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    # HTML FORMATTING HELPERS
+    def format_user_message(self, message: str) -> str:
+        return f"""
+            <table width="100%" style="margin: 4px 0;">
+                <tr>
+                    <td width="20%"></td> <td align="right">
+                        <table style="background-color: #14532d; border-radius: 8px;">
+                            <tr>
+                                <td style="padding: 8px 12px; color: #4ade80; font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px;">
+                                    {message}
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
+        """
+
+    def format_ai_message(self, message: str) -> str:
+        html_message = markdown.markdown(message, extensions=['extra', 'nl2br'])
+        return f"""
+            <table width="100%" style="margin: 4px 0;">
+                <tr>
+                    <td align="left">
+                        <div style="color: {TEXT_MUTED}; font-size: 10px; font-weight: bold; margin-bottom: 2px; letter-spacing: 0.5px;">
+                            BarangAI
+                        </div>
+                        <table style="background-color: {DARK_CARD}; border-radius: 8px; border: 1px solid {DARK_BORDER};">
+                            <tr>
+                                <td style="padding: 10px 14px; color: {TEXT_PRIMARY}; font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; line-height: 1.5;">
+                                    {html_message}
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                    <td width="20%"></td> 
+                </tr>
+            </table>
+        """
+
+    def format_system_message(self, message: str) -> str:
+        return f"""
+            <table width="100%" style="margin: 6px 0;">
+                <tr>
+                    <td align="center">
+                        <table style="background-color: #450a0a; border-radius: 10px; border: 1px solid #7f1d1d;">
+                            <tr>
+                                <td style="padding: 6px 14px; color: {RED_ERROR}; font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; font-weight: bold;">
+                                    ⚠️ {message}
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
+        """
 
     def check_macos_permissions(self):
         if sys.platform == "darwin":
