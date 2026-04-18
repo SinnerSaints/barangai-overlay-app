@@ -9,6 +9,7 @@ from PyQt6.QtGui import QIcon, QPixmap
 from screen_capture import capture_screen
 from api_client import send_message, update_user_preference
 from utils import get_resource_path, clear_auth_data
+import platform
 import ctypes
 import platform # added to check OS 
 import sys
