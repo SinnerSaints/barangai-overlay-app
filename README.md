@@ -1,4 +1,4 @@
-# BarangAI Overlay
+# BarangAI Overlay App
 
 A real-time AI support desktop application designed for Barangay officials. This floating overlay assistant provides instant access to AI guidance without disrupting workflows.
 
@@ -15,7 +15,7 @@ A real-time AI support desktop application designed for Barangay officials. This
 
 ### 1. Clone Repository
 ``````bash
-git clone https://github.com/fuzziiz/BarangAI-Overlay.git
+git clone https://github.com/SinnerSaints/barangai-overlay-app.git
 cd BarangAI-Overlay
 ``````
 
@@ -50,3 +50,4 @@ Features:
 - Click minimize to convert to a floating bubble
 - Drag the bubble anywhere on screen
 - Click bubble to restore full window
+- Change language preferences
