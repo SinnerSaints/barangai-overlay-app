@@ -75,6 +75,41 @@ class AIWorker(QThread):
 
         self.response_ready.emit(result)
 
+class SessionLoaderWorker(QThread):
+    finished = pyqtSignal(dict)
+
+    def __init__(self, user_id, token):
+        super().__init__()
+        self.user_id = user_id
+        self.token = token
+
+    def run(self):
+        from api_client import get_latest_session, get_session_messages
+
+        session_res = get_latest_session(self.user_id, self.token)
+        
+        if not session_res.get("success"):
+            self.finished.emit(session_res)
+            return
+        
+        latest_session = session_res.get("session")
+        if not latest_session:
+            self.finished.emit({"success": True, "messages": [], "session_uuid": None})
+            return
+        
+        session_uuid = latest_session.get("session_uuid")
+
+        msg_res = get_session_messages(session_uuid, self.token)
+        if not msg_res.get("success"):
+            self.finished.emit(msg_res)
+            return
+            
+        self.finished.emit({
+            "success": True, 
+            "messages": msg_res.get("messages", []),
+            "session_uuid": session_uuid
+        })
+
 class FloatingButton(QWidget):
     clicked = pyqtSignal()
 
@@ -625,13 +660,83 @@ class OverlayWindow(QWidget):
 
         self.stacked_widget.addWidget(settings_page) # Add settings to page 1
 
-        # welcome message
+        # Start loading session history if there's one
+        self.display_message("Info", "Fetching latest conversation...")
+        self.input_field.setEnabled(False) # Disable input while loading
+        self.load_session_history()
+        
+        self.check_macos_permissions()
+
+    def load_session_history(self):
+        self.session_worker = SessionLoaderWorker(self.user_id, self.token)
+        self.session_worker.finished.connect(self.on_session_loaded)
+        self.session_worker.start()
+
+    def on_session_loaded(self, result: dict):
+        # Clear the "Fetching..." message completely
+        print(f"DEBUG: Session Load Result -> {result}")
+        self.chat_history_html = ""
+        self.chat_display.setHtml("")
+        self.input_field.setEnabled(True)
+
+        # Check for Token Expiration
+        if not result.get("success"):
+            if result.get("error") == "SESSION_EXPIRED":
+                self.hide() 
+
+                self.expired_dialog = CustomMessageDialog(
+                    "Session Expired", 
+                    "Your security token is no longer valid. Please log in again to continue."
+                )
+                self.expired_dialog.button_clicked.connect(self.perform_logout)
+                self.expired_dialog.show()
+                return
+            else:
+                # Handle other minor errors as neutral info
+                self.chat_history_html = ""
+                self.display_message("Info", "Starting a fresh session.")
+                self.display_welcome_message()
+                self.input_field.setEnabled(True)
+                return
+
+        messages = result.get("messages", [])
+        self.session_uuid = result.get("session_uuid")
+
+        # Load messages or show default greeting
+        if not messages:
+            self.display_welcome_message()
+        else:
+            # Loop through history and rebuild the UI
+            for msg in messages:
+                role = msg.get("role")
+                content = msg.get("content")
+                if role == "user":
+                    self.chat_history_html += self.format_user_message(content)
+                else:
+                    self.chat_history_html += self.format_ai_message(content)
+            
+            self.chat_display.setHtml(self.chat_history_html)
+            
+            # Show the localized "Welcome back" bubble
+            lang_key = self.preferred_language.lower()
+            welcome_back_msgs = {
+                "cebuano": "Maayong pagbalik! Ipadayon nato kung diin ta nihunong.",
+                "tagalog": "Maligayang pagbabalik! Ipagpatuloy natin kung saan tayo huminto.",
+                "english": "Welcome back! Let's continue where we left off.",
+                "default": "Welcome back! Let's continue where we left off."
+            }
+            msg = welcome_back_msgs.get(lang_key, welcome_back_msgs["english"])
+            
+            # We use display_message to smoothly append it to the bottom
+            self.display_message("BarangAI", msg)
+            
+        self.scroll_to_bottom()
+
+    def display_welcome_message(self):
         self.display_message(
             "BarangAI",
             "Hello! I am your BarangAI assistant. How can I help you today?"
         )
-
-        self.check_macos_permissions()
 
     def toggle_settings(self):
         """Flips between the Chat View (Index 0) and Settings View (Index 1)."""
@@ -811,6 +916,8 @@ class OverlayWindow(QWidget):
             self.chat_history_html += self.format_user_message(message)
         elif sender == "BarangAI":
             self.chat_history_html += self.format_ai_message(message)
+        elif sender == "Info":
+            self.chat_history_html += self.format_info_message(message) 
         else:
             self.chat_history_html += self.format_system_message(message)
 
@@ -895,6 +1002,19 @@ class OverlayWindow(QWidget):
                                 </td>
                             </tr>
                         </table>
+                    </td>
+                </tr>
+            </table>
+        """
+    
+    def format_info_message(self, message: str) -> str:
+        return f"""
+            <table width="100%" style="margin: 8px 0;">
+                <tr>
+                    <td align="center">
+                        <div style="color: {TEXT_MUTED}; font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; font-style: italic;">
+                            {message}
+                        </div>
                     </td>
                 </tr>
             </table>
@@ -1002,3 +1122,70 @@ class OverlayWindow(QWidget):
         confirmation_msg = responses.get(lang_key, responses["english"])
 
         self.display_message("BarangAI", confirmation_msg)
+
+class CustomMessageDialog(QWidget):
+    button_clicked = pyqtSignal()
+
+    def __init__(self, title, message, is_error=True):
+        super().__init__()
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedSize(320, 180)
+        
+        # Center on screen
+        screen = QApplication.primaryScreen().geometry()
+        self.move((screen.width() - 320) // 2, (screen.height() - 180) // 2)
+
+        layout = QVBoxLayout(self)
+        container = QWidget()
+        container.setObjectName("dialogContainer")
+        container.setStyleSheet(f"""
+            QWidget#dialogContainer {{
+                background-color: {DARK_BG};
+                border: 2px solid {RED_ERROR if is_error else DARK_BORDER};
+                border-radius: 16px;
+            }}
+        """)
+        
+        inner_layout = QVBoxLayout(container)
+        inner_layout.setContentsMargins(20, 20, 20, 20)
+
+        title_lbl = QLabel(title)
+        title_lbl.setStyleSheet(f"color: {RED_ERROR if is_error else GREEN_PRIMARY}; font-weight: bold; font-size: 16px;")
+        title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        msg_lbl = QLabel(message)
+        msg_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 13px;")
+        msg_lbl.setWordWrap(True)
+        msg_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        ok_btn = QPushButton("Log In Again")
+        ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        ok_btn.setFixedHeight(35)
+        ok_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK_CARD};
+                color: {TEXT_PRIMARY};
+                border: 1px solid {DARK_BORDER};
+                border-radius: 8px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{ background-color: {DARK_BORDER}; }}
+        """)
+        ok_btn.clicked.connect(self.handle_click)
+
+        inner_layout.addWidget(title_lbl)
+        inner_layout.addSpacing(10)
+        inner_layout.addWidget(msg_lbl)
+        inner_layout.addStretch()
+        inner_layout.addWidget(ok_btn)
+        
+        layout.addWidget(container)
+    
+    def handle_click(self):
+        self.close()
+    
+    def closeEvent(self, event):
+        """Ensures that clicking the 'X' to close the window still triggers the logout wipe."""
+        self.button_clicked.emit()
+        super().closeEvent(event)
