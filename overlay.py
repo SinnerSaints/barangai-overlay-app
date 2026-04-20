@@ -182,7 +182,34 @@ class OverlayWindow(QWidget):
         self.typewriter_timer = QTimer()
         self.typewriter_timer.timeout.connect(self.update_typewriter)
 
+        self.loading_timer = QTimer()
+        self.loading_timer.timeout.connect(self.update_loading_dots)
+        self.loading_counter = 0
+
         self.setup_ui()
+    
+    def update_loading_dots(self):
+        """Creates a manual jumping animation for the 3 dots."""
+        frame = self.loading_counter % 3
+        
+        # Build the jumping dots dynamically
+        dots = []
+        for i in range(3):
+            if i == frame:
+                # Jumping dot: Brighter green and larger
+                dots.append(f'<span style="color: {GREEN_PRIMARY}; font-size: 24px;">•</span>')
+            else:
+                # Resting dots: Darker green and normal size
+                dots.append(f'<span style="color: #064e3b; font-size: 18px;">•</span>')
+        
+        # Join them with a non-breaking space
+        dots_html = "&nbsp;".join(dots)
+        
+        preview_html = self.chat_history_html + self.format_ai_typing_indicator(dots_html)
+        
+        self.chat_display.setHtml(preview_html)
+        self.scroll_to_bottom()
+        self.loading_counter += 1
 
     def setup_ui(self):
         self.setWindowTitle("BarangAI")
@@ -673,7 +700,8 @@ class OverlayWindow(QWidget):
         # Task done button
         if self.current_task_start_time is None:
             self.current_task_start_time = time.time()
-            self.complete_task_btn.show()
+        
+        self.complete_task_btn.show()
 
         self.current_task_help_requests += 1
 
@@ -684,7 +712,10 @@ class OverlayWindow(QWidget):
 
         self.input_field.setEnabled(False)
         self.send_btn.setEnabled(False)
-        self.status_label.setText("BIDA is thinking...")
+
+        self.ai_started_thinking_at = time.time()
+        self.loading_counter = 0
+        self.loading_timer.start(250)
 
         screen_data = capture_screen() 
         selected_lang = self.lang_dropdown.currentText().lower()
@@ -703,6 +734,8 @@ class OverlayWindow(QWidget):
 
     def handle_response(self, result: dict):
         self.status_label.setText("")
+
+        self.loading_timer.stop()
 
         # Handle errors immediately
         if not result["success"]:
@@ -793,10 +826,11 @@ class OverlayWindow(QWidget):
         return f"""
             <table width="100%" style="margin: 4px 0;">
                 <tr>
-                    <td width="20%"></td> <td align="right">
-                        <table style="background-color: #14532d; border-radius: 8px;">
+                    <td width="20%"></td> 
+                    <td align="right">
+                        <table cellpadding="10" style="background-color: #14532d; border-radius: 16px;">
                             <tr>
-                                <td style="padding: 8px 12px; color: #4ade80; font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px;">
+                                <td style="color: #4ade80; font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px;">
                                     {message}
                                 </td>
                             </tr>
@@ -812,13 +846,34 @@ class OverlayWindow(QWidget):
             <table width="100%" style="margin: 4px 0;">
                 <tr>
                     <td align="left">
-                        <div style="color: {TEXT_MUTED}; font-size: 10px; font-weight: bold; margin-bottom: 2px; letter-spacing: 0.5px;">
+                        <div style="color: {TEXT_MUTED}; font-size: 10px; font-weight: bold; margin-bottom: 4px; letter-spacing: 0.5px;">
                             BarangAI
                         </div>
-                        <table style="background-color: {DARK_CARD}; border-radius: 8px; border: 1px solid {DARK_BORDER};">
+                        <table cellpadding="10" style="background-color: {DARK_CARD}; border-radius: 16px; border: 1px solid {DARK_BORDER};">
                             <tr>
-                                <td style="padding: 10px 14px; color: {TEXT_PRIMARY}; font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; line-height: 1.5;">
+                                <td style="color: {TEXT_PRIMARY}; font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; line-height: 1.5;">
                                     {html_message}
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                    <td width="20%"></td> 
+                </tr>
+            </table>
+        """
+
+    def format_ai_typing_indicator(self, dots_html: str) -> str:
+        return f"""
+            <table width="100%" style="margin: 4px 0;">
+                <tr>
+                    <td align="left">
+                        <div style="color: {TEXT_MUTED}; font-size: 10px; font-weight: bold; margin-bottom: 4px; letter-spacing: 0.5px;">
+                            BarangAI
+                        </div>
+                        <table width="60" cellpadding="8" style="background-color: {DARK_CARD}; border-radius: 16px; border: 1px solid {DARK_BORDER};">
+                            <tr>
+                                <td align="center" valign="middle" style="height: 18px;">
+                                    {dots_html}
                                 </td>
                             </tr>
                         </table>
@@ -915,8 +970,6 @@ class OverlayWindow(QWidget):
         # Calculate raw time, then subtract the AI's delay
         raw_time = time.time() - self.current_task_start_time
         pure_user_time = max(0.0, raw_time - self.total_ai_processing_time)
-
-        success = False;
         
         from api_client import save_system_log
         save_system_log(
@@ -933,6 +986,8 @@ class OverlayWindow(QWidget):
         self.current_task_help_requests = 0
         self.active_task_type = "unknown"
         self.total_ai_processing_time = 0.0
+
+        self.complete_task_btn.hide()
         
         responses = {
             "cebuano": "Bulahan! Na-record na nako imong progress. Ready na ko sa imong sunod nga pangutana!",
@@ -946,8 +1001,4 @@ class OverlayWindow(QWidget):
         lang_key = self.preferred_language.lower()
         confirmation_msg = responses.get(lang_key, responses["english"])
 
-        if success:
-            self.display_message("BarangAI", confirmation_msg)
-        else:
-            # System fallback for technical errors
-            self.display_message("System", "Log saved locally, but failed to sync with server.")
+        self.display_message("BarangAI", confirmation_msg)
