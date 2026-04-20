@@ -102,10 +102,14 @@ def send_message(
         )
 
         if response.status_code == 200:
+            data = response.json()
+            detected_intent = data.get("nlp_analysis", {}).get("detected_intent", "unknown")
+            
             return {
                 "success": True,
-                "response": response.json().get("response"),
-                "session_uuid": response.json().get("session_uuid"),
+                "response": data.get("response"),
+                "session_uuid": data.get("session_uuid"),
+                "detected_intent": detected_intent
             }
         elif response.status_code == 401:
             return {"success": False, "response": "SESSION_EXPIRED"}
@@ -136,4 +140,29 @@ def update_user_preference(token: str, user_id: int, preferred_language: str) ->
         return response.status_code == 200
     except Exception as e:
         print(f"API Error: {e}")
+        return False
+
+def save_system_log(token: str, task_type: str, time_taken: float, errors: int, help_requests: int) -> bool:
+    """Sends the completed task metrics to the Django backend."""
+    try:
+        url = f"{SERVER_URL}/logs/create/"
+        headers = {"Authorization": f"Bearer {token}"}
+        payload = {
+            "task_type": task_type,
+            "time_taken_seconds": round(time_taken, 2),
+            "error_count": errors,
+            "help_requests_count": help_requests
+        }
+
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        
+        if response.status_code == 201:
+            print(f"Successfully saved system log: {task_type}")
+            return True
+        else:
+            print(f"Failed to save log. Status: {response.status_code}, Msg: {response.text}")
+            return False
+            
+    except Exception as e:
+        print(f"API Error saving log: {e}")
         return False

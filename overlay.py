@@ -15,6 +15,7 @@ import platform # added to check OS
 import sys
 import os
 import markdown
+import time
 
 DARK_BG       = "#0f1923"
 DARK_CARD     = "#1a2535"
@@ -162,6 +163,14 @@ class OverlayWindow(QWidget):
         self.session_uuid = None
         self.drag_position = QPoint()
         self.preferred_language = preferred_language
+
+        self.current_task_start_time = None
+        self.current_task_errors = 0
+        self.current_task_help_requests = 0
+        self.active_task_type = "unknown"
+
+        self.ai_started_thinking_at = None 
+        self.total_ai_processing_time = 0.0
 
         self.floating_btn = FloatingButton()
         self.floating_btn.clicked.connect(self.show_overlay)
@@ -414,6 +423,25 @@ class OverlayWindow(QWidget):
         """)
         input_layout.addWidget(self.send_btn)
 
+        self.complete_task_btn = QPushButton("✅ Done")
+        self.complete_task_btn.setFixedSize(70, 40)
+        self.complete_task_btn.clicked.connect(self.mark_task_complete)
+        self.complete_task_btn.hide() # Hidden by default until a task starts
+        self.complete_task_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {GREEN_PRIMARY};
+                border: 1px solid {GREEN_PRIMARY};
+                border-radius: 20px;
+                font-size: 13px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK_BORDER};
+            }}
+        """)
+        input_layout.addWidget(self.complete_task_btn)
+
         chat_layout.addWidget(input_widget)
         self.stacked_widget.addWidget(chat_page) # Add chat to page 0
 
@@ -641,6 +669,15 @@ class OverlayWindow(QWidget):
         user_message = self.input_field.text().strip()
         if not user_message:
             return
+        
+        # Task done button
+        if self.current_task_start_time is None:
+            self.current_task_start_time = time.time()
+            self.complete_task_btn.show()
+
+        self.current_task_help_requests += 1
+
+        self.ai_started_thinking_at = time.time()
 
         self.display_message("You", user_message)
         self.input_field.clear()
@@ -680,6 +717,16 @@ class OverlayWindow(QWidget):
             else:
                 self.display_message("System", result["response"])
             return
+        
+        intent = result.get("detected_intent", "unknown")
+        if intent and intent != "greeting":
+            self.active_task_type = intent
+
+        ai_text = result["response"]
+        fallback_phrases = ["Pasensya, wala nako na klaro", "Unsay buot nimong ipasabot", "Unsang application"]
+        
+        if any(phrase in ai_text for phrase in fallback_phrases):
+            self.current_task_errors += 1
 
         if result.get("session_uuid"):
             self.session_uuid = result["session_uuid"]
@@ -698,6 +745,11 @@ class OverlayWindow(QWidget):
             # Typing is complete
             self.typewriter_index = len(self.full_ai_text)
             self.typewriter_timer.stop()
+
+            if self.ai_started_thinking_at:
+                ai_duration = time.time() - self.ai_started_thinking_at
+                self.total_ai_processing_time += ai_duration
+                self.ai_started_thinking_at = None
             
             # Commit the final fully-rendered message to the history string
             self.chat_history_html += self.format_ai_message(self.full_ai_text)
@@ -855,3 +907,47 @@ class OverlayWindow(QWidget):
             print("Auth data updated.")
         else:
             print("Failed to sync language preference to the cloud.")
+
+    def mark_task_complete(self):
+        if not self.current_task_start_time:
+            return
+            
+        # Calculate raw time, then subtract the AI's delay
+        raw_time = time.time() - self.current_task_start_time
+        pure_user_time = max(0.0, raw_time - self.total_ai_processing_time)
+
+        success = False;
+        
+        from api_client import save_system_log
+        save_system_log(
+            token=self.token,
+            task_type=self.active_task_type, 
+            time_taken=pure_user_time,
+            errors=self.current_task_errors,
+            help_requests=self.current_task_help_requests
+        )
+        
+        # Reset all trackers
+        self.current_task_start_time = None
+        self.current_task_errors = 0
+        self.current_task_help_requests = 0
+        self.active_task_type = "unknown"
+        self.total_ai_processing_time = 0.0
+        
+        responses = {
+            "cebuano": "Bulahan! Na-record na nako imong progress. Ready na ko sa imong sunod nga pangutana!",
+            "tagalog": "Mahusay! Na-record ko na ang iyong progress. Handa na ako sa susunod mong katanungan!",
+            "english": "Great job! I've recorded your progress. I'm ready for your next question!",
+            "default": "Great job! I've recorded your progress. I'm ready for your next question!"
+        }
+
+        # Get the message based on settings (fallback to English if not found)
+        # Note: self.preferred_language should be lowercased to match keys
+        lang_key = self.preferred_language.lower()
+        confirmation_msg = responses.get(lang_key, responses["english"])
+
+        if success:
+            self.display_message("BarangAI", confirmation_msg)
+        else:
+            # System fallback for technical errors
+            self.display_message("System", "Log saved locally, but failed to sync with server.")
