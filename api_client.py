@@ -166,3 +166,45 @@ def save_system_log(token: str, task_type: str, time_taken: float, errors: int, 
     except Exception as e:
         print(f"API Error saving log: {e}")
         return False
+
+def get_latest_session(user_id: int, token: str) -> dict:
+    """Fetches the user's most recent chat session to resume."""
+    try:
+        response = requests.get(
+            f"{SERVICE_URL}/sessions/",
+            params={"user_id": user_id},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10
+        )
+        
+        if response.status_code == 401:
+            return {"success": False, "error": "SESSION_EXPIRED"}
+            
+        if response.status_code == 200:
+            sessions = response.json()
+            if sessions:
+                return {"success": True, "session": sessions[0]}
+            return {"success": True, "session": None}
+            
+        return {"success": False, "error": f"Server returned {response.status_code}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+def get_session_messages(session_uuid: str, token: str) -> dict:
+    """Fetches all messages belonging to a specific session."""
+    try:
+        response = requests.get(
+            f"{SERVICE_URL}/sessions/{session_uuid}/messages?limit=15",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10
+        )
+        
+        if response.status_code == 401:
+            return {"success": False, "error": "SESSION_EXPIRED"}
+            
+        if response.status_code == 200:
+            return {"success": True, "messages": response.json()}
+            
+        return {"success": False, "error": f"Server returned {response.status_code}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
