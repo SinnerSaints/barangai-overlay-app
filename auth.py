@@ -1,9 +1,10 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel,
-    QLineEdit, QPushButton, QApplication
+    QLineEdit, QPushButton, QApplication, 
+    QHBoxLayout
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QPixmap, QFont, QColor
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
+from PyQt6.QtGui import QPixmap, QFont, QColor, QIcon
 from api_client import login
 from utils import save_auth_data, get_resource_path
 
@@ -55,6 +56,9 @@ class LoginWindow(QWidget):
             }
             QLineEdit::placeholder {
                 color: #6b7280;
+            }
+            QLineEdit#passwordInput {
+                padding-right: 40px; 
             }
             QPushButton#loginBtn {
                 background-color: #4ade80;
@@ -127,10 +131,37 @@ class LoginWindow(QWidget):
         layout.addWidget(password_label)
 
         self.password_input = QLineEdit()
+        self.password_input.setObjectName("passwordInput")
         self.password_input.setPlaceholderText("Enter your password")
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_input.setFixedHeight(46)
         self.password_input.returnPressed.connect(self.handle_login)
+
+        self.toggle_pwd_btn = QPushButton("")
+        self.toggle_pwd_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.toggle_pwd_btn.setFixedSize(30, 30)
+
+        icon_path = get_resource_path("assets/eye-slash.svg")
+        self.toggle_pwd_btn.setIcon(QIcon(icon_path))
+        self.toggle_pwd_btn.setIconSize(QSize(20, 20))
+
+        self.toggle_pwd_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.toggle_pwd_btn.setFixedSize(30, 30)
+        self.toggle_pwd_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: none;
+            }
+            QPushButton:hover {
+                color: #4ade80;
+            }
+        """)
+        self.toggle_pwd_btn.clicked.connect(self.toggle_password_visibility)
+
+        pwd_layout = QHBoxLayout(self.password_input)
+        pwd_layout.setContentsMargins(0, 0, 8, 0)
+        pwd_layout.addWidget(self.toggle_pwd_btn, alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
         layout.addWidget(self.password_input)
 
         self.status_label = QLabel("")
@@ -179,6 +210,15 @@ class LoginWindow(QWidget):
             self.login_btn.setEnabled(True)
             self.email_input.setEnabled(True)
             self.password_input.setEnabled(True)
+    
+    def toggle_password_visibility(self):
+        """Switches between the eye and eye-slash SVGs."""
+        if self.password_input.echoMode() == QLineEdit.EchoMode.Password:
+            self.password_input.setEchoMode(QLineEdit.EchoMode.Normal)
+            self.toggle_pwd_btn.setIcon(QIcon(get_resource_path("assets/eye.svg")))
+        else:
+            self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+            self.toggle_pwd_btn.setIcon(QIcon(get_resource_path("assets/eye-slash.svg")))
     
     def closeEvent(self, event):
         """
