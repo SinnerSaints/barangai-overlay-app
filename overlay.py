@@ -5,10 +5,11 @@ from PyQt6.QtWidgets import (
     QStackedWidget, QComboBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QPoint, QSize, QTimer
-from PyQt6.QtGui import QIcon, QPixmap
+from PyQt6.QtGui import QIcon, QPixmap, QTextCursor
 from screen_capture import capture_screen
 from api_client import send_message, update_user_preference
 from utils import get_resource_path, clear_auth_data
+from datetime import datetime, timezone
 import platform
 import ctypes
 import platform # added to check OS 
@@ -242,8 +243,7 @@ class OverlayWindow(QWidget):
         
         preview_html = self.chat_history_html + self.format_ai_typing_indicator(dots_html)
         
-        self.chat_display.setHtml(preview_html)
-        self.scroll_to_bottom()
+        self.update_chat_ui(preview_html)
         self.loading_counter += 1
 
     def setup_ui(self):
@@ -710,12 +710,35 @@ class OverlayWindow(QWidget):
             for msg in messages:
                 role = msg.get("role")
                 content = msg.get("content")
+                raw_time = msg.get("time")
+                
+                formatted_time = None
+                if raw_time:
+                    try:
+                        # Clean the string so fromisoformat() can read it easily
+                        clean_time = raw_time.replace('Z', '').replace(' ', 'T')
+                        
+                        # Parse it into a Python datetime object
+                        dt_utc = datetime.fromisoformat(clean_time)
+                        
+                        # Explicitly tell Python this time is in UTC
+                        if dt_utc.tzinfo is None:
+                            dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+                        
+                        # Convert to local timezone
+                        dt_local = dt_utc.astimezone()
+                        
+                        # Format to 12-hour AM/PM
+                        formatted_time = dt_local.strftime("%I:%M %p")
+                    except Exception as e:
+                        print(f"Time parsing error: {e}")
+
                 if role == "user":
-                    self.chat_history_html += self.format_user_message(content)
+                    self.chat_history_html += self.format_user_message(content, timestamp=formatted_time)
                 else:
-                    self.chat_history_html += self.format_ai_message(content)
+                    self.chat_history_html += self.format_ai_message(content, timestamp=formatted_time)
             
-            self.chat_display.setHtml(self.chat_history_html)
+            self.update_chat_ui(self.chat_history_html)
             
             # Show the localized "Welcome back" bubble
             lang_key = self.preferred_language.lower()
@@ -729,8 +752,6 @@ class OverlayWindow(QWidget):
             
             # We use display_message to smoothly append it to the bottom
             self.display_message("BarangAI", msg)
-            
-        self.scroll_to_bottom()
 
     def display_welcome_message(self):
         self.display_message(
@@ -872,11 +893,11 @@ class OverlayWindow(QWidget):
         # Start the typing animation instead of showing it all at once
         self.full_ai_text = result["response"]
         self.typewriter_index = 0
-        self.typewriter_timer.start(15) # Speed: 15 milliseconds per tick
+        self.typewriter_timer.start(35) # Speed: 35 milliseconds per tick
 
     def update_typewriter(self):
         # Advance the typing index (increase chunk_size to type faster)
-        chunk_size = 2 
+        chunk_size = 3 
         self.typewriter_index += chunk_size
         
         if self.typewriter_index >= len(self.full_ai_text):
@@ -898,17 +919,15 @@ class OverlayWindow(QWidget):
             self.input_field.setFocus()
             
             # Render final state
-            self.chat_display.setHtml(self.chat_history_html)
-            self.scroll_to_bottom()
+            self.update_chat_ui(self.chat_history_html)
         else:
             # Typing is in progress: Render the partial text
             current_text = self.full_ai_text[:self.typewriter_index]
             
             # Combine locked history with the current typing bubble
-            preview_html = self.chat_history_html + self.format_ai_message(current_text)
+            preview_html = self.chat_history_html + self.format_ai_message_typing(current_text)
             
-            self.chat_display.setHtml(preview_html)
-            self.scroll_to_bottom()
+            self.update_chat_ui(preview_html)
 
     def display_message(self, sender: str, message: str):
         """Immediately displays messages that don't need a typing effect (User, System, Welcome)."""
@@ -921,23 +940,24 @@ class OverlayWindow(QWidget):
         else:
             self.chat_history_html += self.format_system_message(message)
 
-        self.chat_display.setHtml(self.chat_history_html)
-        self.scroll_to_bottom()
-
-    def scroll_to_bottom(self):
-        scrollbar = self.chat_display.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+        self.update_chat_ui(self.chat_history_html)
 
     # HTML FORMATTING HELPERS
-    def format_user_message(self, message: str) -> str:
+    def format_user_message(self, message: str, timestamp: str = None) -> str:
+        # Auto-generate current time if none is provided
+        time_str = timestamp if timestamp else time.strftime("%I:%M %p")
+        
         return f"""
             <table width="100%" style="margin: 4px 0;">
                 <tr>
                     <td width="20%"></td> 
                     <td align="right">
-                        <table cellpadding="10" style="background-color: #14532d; border-radius: 16px;">
+                        <div style="color: {TEXT_MUTED}; font-size: 10px; font-weight: bold; margin-bottom: 4px; letter-spacing: 0.5px;">
+                            You • {time_str}
+                        </div>
+                        <table cellpadding="10" style="background-color: #064e3b; border-radius: 16px; border: 1px solid #16a34a;">
                             <tr>
-                                <td style="color: #4ade80; font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px;">
+                                <td style="color: {TEXT_PRIMARY}; font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; line-height: 1.5;">
                                     {message}
                                 </td>
                             </tr>
@@ -947,14 +967,16 @@ class OverlayWindow(QWidget):
             </table>
         """
 
-    def format_ai_message(self, message: str) -> str:
+    def format_ai_message(self, message: str, timestamp: str = None) -> str:
+        time_str = timestamp if timestamp else time.strftime("%I:%M %p")
         html_message = markdown.markdown(message, extensions=['extra', 'nl2br'])
+        
         return f"""
             <table width="100%" style="margin: 4px 0;">
                 <tr>
                     <td align="left">
                         <div style="color: {TEXT_MUTED}; font-size: 10px; font-weight: bold; margin-bottom: 4px; letter-spacing: 0.5px;">
-                            BarangAI
+                            BarangAI • {time_str}
                         </div>
                         <table cellpadding="10" style="background-color: {DARK_CARD}; border-radius: 16px; border: 1px solid {DARK_BORDER};">
                             <tr>
@@ -968,14 +990,40 @@ class OverlayWindow(QWidget):
                 </tr>
             </table>
         """
-
-    def format_ai_typing_indicator(self, dots_html: str) -> str:
+    
+    def format_ai_message_typing(self, message: str, timestamp: str = None) -> str:
+        time_str = timestamp if timestamp else time.strftime("%I:%M %p")
+        safe_text = message.replace('\n', '<br>')
+        
         return f"""
             <table width="100%" style="margin: 4px 0;">
                 <tr>
                     <td align="left">
                         <div style="color: {TEXT_MUTED}; font-size: 10px; font-weight: bold; margin-bottom: 4px; letter-spacing: 0.5px;">
-                            BarangAI
+                            BarangAI • {time_str}
+                        </div>
+                        <table cellpadding="10" style="background-color: {DARK_CARD}; border-radius: 16px; border: 1px solid {DARK_BORDER};">
+                            <tr>
+                                <td style="color: {TEXT_PRIMARY}; font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; line-height: 1.5;">
+                                    {safe_text}
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                    <td width="20%"></td> 
+                </tr>
+            </table>
+        """
+
+    def format_ai_typing_indicator(self, dots_html: str, timestamp: str = None) -> str:
+        time_str = timestamp if timestamp else time.strftime("%I:%M %p")
+        
+        return f"""
+            <table width="100%" style="margin: 4px 0;">
+                <tr>
+                    <td align="left">
+                        <div style="color: {TEXT_MUTED}; font-size: 10px; font-weight: bold; margin-bottom: 4px; letter-spacing: 0.5px;">
+                            BarangAI • {time_str}
                         </div>
                         <table width="60" cellpadding="8" style="background-color: {DARK_CARD}; border-radius: 16px; border: 1px solid {DARK_BORDER};">
                             <tr>
@@ -1122,6 +1170,26 @@ class OverlayWindow(QWidget):
         confirmation_msg = responses.get(lang_key, responses["english"])
 
         self.display_message("BarangAI", confirmation_msg)
+
+    def update_chat_ui(self, new_html: str):
+        """Updates the chat HTML and scrolls down without flickering the screen."""
+        # Freeze screen drawing & update html to prevent flicker
+        self.chat_display.setUpdatesEnabled(False) 
+        self.chat_display.setHtml(new_html)
+        
+        # Force PyQt to calculate the new scroll math (but it won't draw it yet)
+        QApplication.processEvents()
+        
+        # Move the cursor and scrollbar to the very bottom
+        cursor = self.chat_display.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self.chat_display.setTextCursor(cursor)
+        
+        scrollbar = self.chat_display.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+        
+        # Unfreeze screen drawing
+        self.chat_display.setUpdatesEnabled(True)
 
 class CustomMessageDialog(QWidget):
     button_clicked = pyqtSignal()
